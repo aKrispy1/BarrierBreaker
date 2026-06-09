@@ -4,13 +4,15 @@ let lastUrl = '';
 let isInjecting = false;
 let currentVideos = [];
 let activeFilters = new Set(); // Set of active language codes
+let checkUrlInterval = null;
+let currentPage = 1;
+let isFetchingMore = false;
 
 // Search & Sorting States
 let layoutMode = 'grid'; // 'grid' or 'list'
 let sortBy = 'relevance'; // 'relevance', 'views', 'date'
 let durationFilter = 'any'; // 'any', 'short', 'medium', 'long'
 let visibleCount = 6; // Pagination count
-let checkUrlInterval = null;
 
 // Sleek Pastel SVG Logo (matches icon.svg style)
 const LOGO_SVG = `
@@ -175,6 +177,8 @@ async function setupDiscoveryLayer(query) {
       
       // Reset visible pagination on new search
       visibleCount = 6;
+      currentPage = 1;
+      isFetchingMore = false;
 
       renderDiscoveryGrid(container);
     });
@@ -483,7 +487,7 @@ function renderCards(grid, footer) {
     grid.appendChild(card);
   });
 
-  // 5. Render "Show More" Pagination Button if there are remaining results
+  // 5. Render "Show More" Pagination Button
   if (visibleCount < processed.length) {
     const showMoreBtn = document.createElement('button');
     showMoreBtn.className = 'bb-show-more-btn';
@@ -493,6 +497,84 @@ function renderCards(grid, footer) {
       renderCards(grid, footer);
     });
     footer.appendChild(showMoreBtn);
+  } else {
+    // All locally loaded items are displayed. Show option to fetch page Y from servers
+    const loadMoreBtn = document.createElement('button');
+    loadMoreBtn.className = 'bb-show-more-btn';
+    loadMoreBtn.textContent = `Load More Results (Page ${currentPage + 1})`;
+    loadMoreBtn.addEventListener('click', () => {
+      loadNextPageFromServer(grid, footer);
+    });
+    footer.appendChild(loadMoreBtn);
+  }
+}
+
+function loadNextPageFromServer(grid, footer) {
+  if (isFetchingMore) return;
+  isFetchingMore = true;
+  
+  const loadMoreBtn = footer.querySelector('.bb-show-more-btn');
+  if (loadMoreBtn) {
+    loadMoreBtn.textContent = 'Loading more global results...';
+    loadMoreBtn.disabled = true;
+  }
+  
+  currentPage++;
+  
+  if (!isContextValid()) return;
+  
+  try {
+    console.log(`[BarrierBreaker] Fetching page ${currentPage} from background server for query: "${lastQuery}"`);
+    chrome.runtime.sendMessage({ 
+      type: 'FETCH_GLOBAL_RESULTS', 
+      query: lastQuery, 
+      page: currentPage 
+    }, (response) => {
+      isFetchingMore = false;
+      
+      if (!isContextValid()) return;
+      
+      if (chrome.runtime.lastError || !response || !response.success) {
+        console.warn('[BarrierBreaker] Fetch more results failed:', chrome.runtime.lastError || response?.error);
+        if (loadMoreBtn) {
+          loadMoreBtn.textContent = 'Failed to load. Click to retry';
+          loadMoreBtn.disabled = false;
+        }
+        currentPage--;
+        return;
+      }
+      
+      const newVideos = response.videos || [];
+      if (newVideos.length === 0) {
+        if (loadMoreBtn) {
+          loadMoreBtn.textContent = 'No further results available';
+          loadMoreBtn.disabled = true;
+        }
+        return;
+      }
+      
+      // Append and deduplicate by video ID against existing loaded videos
+      const seenIds = new Set(currentVideos.map(v => v.id));
+      newVideos.forEach(v => {
+        if (!seenIds.has(v.id)) {
+          currentVideos.push(v);
+          seenIds.add(v.id);
+        }
+      });
+      
+      // Add any new languages returned on this page to activeFilters
+      newVideos.forEach(v => activeFilters.add(v.language.code));
+      
+      // Increment visibleCount to display the new row
+      visibleCount += 6;
+      
+      // Re-render
+      renderCards(grid, footer);
+    });
+  } catch (err) {
+    isFetchingMore = false;
+    currentPage--;
+    console.warn('[BarrierBreaker] Failed to request more results:', err);
   }
 }
 
