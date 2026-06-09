@@ -1,26 +1,16 @@
-// All supported languages with their names and glassmorphic pastel accents
+// All supported languages with their names, accents, regions, and franc ISO-639-3 codes
 const LANGUAGE_PRESETS = [
-  { code: 'ja', name: 'Japanese', accent: '#ff6b8b', region: 'JP' },
-  { code: 'es', name: 'Spanish', accent: '#ffd166', region: 'ES' },
-  { code: 'ru', name: 'Russian', accent: '#06d6a0', region: 'RU' },
-  { code: 'ar', name: 'Arabic', accent: '#118ab2', region: 'SA' },
-  { code: 'fr', name: 'French', accent: '#8338ec', region: 'FR' },
-  { code: 'de', name: 'German', accent: '#f77f00', region: 'DE' },
-  { code: 'zh', name: 'Chinese', accent: '#2ec4b6', region: 'TW' },
-  { code: 'hi', name: 'Hindi', accent: '#ff007f', region: 'IN' }
+  { code: 'ja', name: 'Japanese', accent: '#ff6b8b', region: 'JP', iso3: 'jpn', scripts: ['cjk'] },
+  { code: 'es', name: 'Spanish', accent: '#ffd166', region: 'ES', iso3: 'spa', scripts: ['latin'] },
+  { code: 'ru', name: 'Russian', accent: '#06d6a0', region: 'RU', iso3: 'rus', scripts: ['cyrillic'] },
+  { code: 'ar', name: 'Arabic', accent: '#118ab2', region: 'SA', iso3: 'ara', scripts: ['arabic'] },
+  { code: 'fr', name: 'French', accent: '#8338ec', region: 'FR', iso3: 'fra', scripts: ['latin'] },
+  { code: 'de', name: 'German', accent: '#f77f00', region: 'DE', iso3: 'deu', scripts: ['latin'] },
+  { code: 'zh', name: 'Chinese', accent: '#2ec4b6', region: 'TW', iso3: 'cmn', scripts: ['cjk'] },
+  { code: 'hi', name: 'Hindi', accent: '#ff007f', region: 'IN', iso3: 'hin', scripts: ['devanagari'] }
 ];
 
 const DEFAULT_LANGUAGES = LANGUAGE_PRESETS.slice(0, 5); // ja, es, ru, ar, fr
-
-const DEFAULT_INSTANCES = [
-  'https://inv.thepixora.com',
-  'https://yewtu.be',
-  'https://invidious.projectsegfau.lt',
-  'https://invidious.flokinet.to',
-  'https://invidious.privacydev.net',
-  'https://invidious.lunar.icu',
-  'https://invidious.fdn.fr'
-];
 
 document.addEventListener('DOMContentLoaded', () => {
   loadConfig();
@@ -35,7 +25,6 @@ function loadConfig() {
   chrome.storage.local.get([
     'isEnabled',
     'activeLanguages',
-    'invidiousInstances',
     'bubblesBurst',
     'maxResultsPerLang',
     'excludeEnglish'
@@ -73,10 +62,6 @@ function loadConfig() {
       
       container.appendChild(label);
     });
-    
-    // 5. Set Proxies Textarea
-    const instances = res.invidiousInstances || DEFAULT_INSTANCES;
-    document.getElementById('proxies-input').value = instances.join('\n');
   });
 }
 
@@ -90,10 +75,9 @@ function togglePower() {
 
 // Save configuration to storage
 function saveConfig() {
-  // 1. Get power status
   const isEnabled = document.getElementById('power-toggle').checked;
   
-  // 2. Get active languages
+  // Get active languages
   const activeLangs = [];
   const checkboxes = document.querySelectorAll('.lang-checkbox');
   checkboxes.forEach(cb => {
@@ -109,23 +93,11 @@ function saveConfig() {
     return;
   }
   
-  // 3. Get max results
+  // Get max results
   let maxResults = parseInt(document.getElementById('max-results').value, 10);
   if (isNaN(maxResults) || maxResults < 1) maxResults = 1;
   if (maxResults > 50) maxResults = 50;
   document.getElementById('max-results').value = maxResults;
-  
-  // 4. Get proxies
-  const proxiesText = document.getElementById('proxies-input').value;
-  const instances = proxiesText
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line.length > 0 && (line.startsWith('http://') || line.startsWith('https://')));
-    
-  if (instances.length === 0) {
-    showToast('Add at least one valid HTTP proxy URL!', '#FF3B30');
-    return;
-  }
   
   const excludeEnglish = document.getElementById('exclude-english-toggle').checked;
   
@@ -133,7 +105,6 @@ function saveConfig() {
   chrome.storage.local.set({
     isEnabled,
     activeLanguages: activeLangs,
-    invidiousInstances: instances,
     maxResultsPerLang: maxResults,
     excludeEnglish
   }, () => {
@@ -146,7 +117,6 @@ function resetConfig() {
   chrome.storage.local.set({
     isEnabled: true,
     activeLanguages: DEFAULT_LANGUAGES,
-    invidiousInstances: DEFAULT_INSTANCES,
     maxResultsPerLang: 15,
     excludeEnglish: false
   }, () => {
@@ -164,7 +134,6 @@ function showToast(message, color = '#06d6a0') {
   toast.style.color = color;
   toast.classList.add('visible');
   
-  // Clear previous timeout if active
   if (window.toastTimeout) clearTimeout(window.toastTimeout);
   
   window.toastTimeout = setTimeout(() => {

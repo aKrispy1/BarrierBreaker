@@ -1,0 +1,23 @@
+{
+  "name": "barrierbreaker",
+  "version": "2.0.0",
+  "description": "Break out of your algorithmic YouTube bubble. ML-powered language detection for global content discovery.",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/background.js --bundle --outfile=background.js --format=iife --platform=browser --target=chrome120",
+    "watch": "esbuild src/background.js --bundle --outfile=background.js --format=iife --platform=browser --target=chrome120 --watch",
+    "dev": "npm run watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aKrispy1/BarrierBreaker.git"
+  },
+  "keywords": ["youtube", "chrome-extension", "language-detection", "global-content"],
+  "author": "aKrispy1",
+  "license": "ISC",
+  "dependencies": {
+    "esbuild": "^0.25.0",
+    "franc-min": "^6.2.0",
+    "youtubei.js": "^13.0.0"
+  }
+}
