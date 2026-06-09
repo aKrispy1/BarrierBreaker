@@ -24,21 +24,28 @@ function init() {
 
 function checkUrl() {
   const url = window.location.href;
-  if (url === lastUrl) return;
-  lastUrl = url;
 
   if (url.includes('/results') && url.includes('search_query=')) {
     const urlParams = new URLSearchParams(window.location.search);
     const query = urlParams.get('search_query');
+    const existing = document.getElementById('barrier-breaker-discovery-layer');
     
-    if (query && (query !== lastQuery || !document.getElementById('barrier-breaker-discovery-layer'))) {
+    // Trigger injection if:
+    // 1. The query string has changed
+    // 2. The page URL has changed
+    // 3. Or the container has been wiped out from the DOM by YouTube's SPA router
+    if (query && (query !== lastQuery || url !== lastUrl || !existing)) {
       lastQuery = query;
+      lastUrl = url;
       setupDiscoveryLayer(query);
     }
   } else {
     // If we moved away from search results, clean up
-    removeDiscoveryLayer();
-    lastQuery = '';
+    if (url !== lastUrl) {
+      removeDiscoveryLayer();
+      lastQuery = '';
+      lastUrl = url;
+    }
   }
 }
 

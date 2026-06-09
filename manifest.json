@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "description": "Break out of your algorithmic YouTube bubble. Localizes searches globally in high-contrast brutalist liquid glass.",
   "permissions": [
-    "storage"
+    "storage",
+    "declarativeNetRequest"
   ],
   "host_permissions": [
     "*://*.youtube.com/*",

@@ -17,8 +17,54 @@ const DEFAULT_INSTANCES = [
   'https://invidious.fdn.fr'
 ];
 
+const RULE_ID = 1;
+
+async function setupHeaderRules() {
+  try {
+    const oldRules = await chrome.declarativeNetRequest.getDynamicRules();
+    const oldRuleIds = oldRules.map(r => r.id);
+    
+    const rules = [
+      {
+        id: RULE_ID,
+        priority: 1,
+        action: {
+          type: "modifyHeaders",
+          requestHeaders: [
+            { header: "origin", operation: "remove" },
+            { header: "referer", operation: "remove" },
+            { header: "user-agent", operation: "set", value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" }
+          ]
+        },
+        condition: {
+          urlFilter: "*",
+          domains: [
+            "translate.googleapis.com", 
+            "yewtu.be", 
+            "invidious.projectsegfau.lt", 
+            "invidious.flokinet.to", 
+            "invidious.privacydev.net", 
+            "invidious.lunar.icu", 
+            "invidious.fdn.fr"
+          ],
+          resourceTypes: ["xmlhttprequest"]
+        }
+      }
+    ];
+
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: oldRuleIds,
+      addRules: rules
+    });
+    console.log("[BarrierBreaker] Header bypass rules registered.");
+  } catch (err) {
+    console.warn("Failed registering declarativeNetRequest rules:", err);
+  }
+}
+
 // Initialize default settings on install
 chrome.runtime.onInstalled.addListener(() => {
+  setupHeaderRules();
   chrome.storage.local.get(['activeLanguages', 'invidiousInstances', 'bubblesBurst', 'isEnabled', 'maxResultsPerLang'], (res) => {
     const updates = {};
     if (!res.activeLanguages) updates.activeLanguages = DEFAULT_LANGUAGES;
@@ -31,6 +77,10 @@ chrome.runtime.onInstalled.addListener(() => {
       chrome.storage.local.set(updates);
     }
   });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  setupHeaderRules();
 });
 
 // Translation Helper
@@ -214,7 +264,8 @@ function formatViews(num) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'FETCH_GLOBAL_RESULTS') {
     chrome.storage.local.get('isEnabled', (store) => {
-      if (!store.isEnabled) {
+      const isEnabled = store.isEnabled !== false;
+      if (!isEnabled) {
         sendResponse({ success: true, videos: [], disabled: true });
         return;
       }
