@@ -12,12 +12,16 @@
     "type": "git",
     "url": "git+https://github.com/aKrispy1/BarrierBreaker.git"
   },
-  "keywords": ["youtube", "chrome-extension", "language-detection", "global-content"],
+  "keywords": [
+    "youtube",
+    "chrome-extension",
+    "language-detection",
+    "global-content"
+  ],
   "author": "aKrispy1",
   "license": "ISC",
   "dependencies": {
     "esbuild": "^0.25.0",
-    "franc-min": "^6.2.0",
-    "youtubei.js": "^13.0.0"
+    "franc-min": "^6.2.0"
   }
 }

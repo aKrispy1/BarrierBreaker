@@ -123,7 +123,7 @@ async function setupDiscoveryLayer(query) {
         <div class="bb-loading-bar"></div>
       </div>
       <div class="bb-loading-status" id="bb-loading-status">
-        Translating query to regional languages & routing via decentralized proxy nodes
+        Querying YouTube's regional indices and verifying content language...
       </div>
     </div>
   `;
@@ -215,7 +215,7 @@ function renderEmpty(container) {
       </div>
     </div>
     <div style="text-align: center; padding: 24px; font-size: 13px; color: var(--bb-text-secondary); opacity: 0.8;">
-      All proxy instances returned empty results. Try adjustments in the extension configuration.
+      No regional results matched the selected languages. Try modifying your language preferences in the popup settings.
     </div>
   `;
 }
@@ -470,7 +470,7 @@ function renderCards(grid, footer) {
         <div class="bb-channel">${v.author}</div>
         <div class="bb-meta-row">
           <span>${v.viewsText ? `${v.viewsText} • ` : ''}${v.publishedText}</span>
-          <span class="bb-proxy-info">${v.source === 'innertube' ? 'youtube' : parseHostname(v.instanceUsed)}${v.langConfidence ? ` • ${v.detectedLang} (${Math.round(v.langConfidence * 100)}%)` : ''}</span>
+          <span class="bb-proxy-info">${v.source || 'youtube'}${v.langConfidence ? ` • ${v.detectedLang} (${Math.round(v.langConfidence * 100)}%)` : ''}</span>
         </div>
       </div>
     `;

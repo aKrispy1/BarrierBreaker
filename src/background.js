@@ -1,12 +1,11 @@
 // ============================================================
-// BARRIERBREAKER v3 — youtubei.js + franc Language Detection
+// BARRIERBREAKER v4 — Direct YouTube Localization
 // ============================================================
-// Primary: YouTube InnerTube via youtubei.js (gl/hl localization)
+// Primary: YouTube HTML Scraping (gl/hl localization)
 // Language ID: franc-min trigram classifier
-// Pipeline: InnerTube → big candidate set → ML lang filter → UI
+// Pipeline: Fetch HTML → Parse ytInitialData → ML lang filter → UI
 // ============================================================
 
-import { Innertube } from 'youtubei.js';
 import { franc, francAll } from 'franc-min';
 
 // --- CONFIGURATION ---
@@ -63,36 +62,12 @@ const KNOWN_ENTITIES = new Set([
   'chatgpt', 'openai', 'google', 'microsoft', 'amazon'
 ]);
 
-// InnerTube client cache: lang_region → Innertube instance
-const clientCache = {};
 let globalSeenIds = new Set();
 let lastSearchQuery = '';
-// Search continuation cache: query_lang_region -> { page: number, search: Search }
+// Search state cache: cacheKey -> { page: number, apiKey: string, token: string }
 const activeSearches = {};
 
-// --- INNERTUBE CLIENT MANAGEMENT ---
-
-async function getInnerTubeClient(langCode, region) {
-  const key = `${langCode}_${region}`;
-  if (clientCache[key]) return clientCache[key];
-
-  try {
-    const yt = await Innertube.create({
-      lang: langCode,
-      location: region,
-      retrieve_player: false // Don't need player for search
-    });
-    clientCache[key] = yt;
-    console.log(`[BB] Created InnerTube client for ${langCode}/${region}`);
-    return yt;
-  } catch (err) {
-    console.error(`[BB] Failed creating InnerTube client for ${langCode}/${region}:`, err);
-    throw err;
-  }
-}
-
-// --- HEADER BYPASS (for Google Translate only now) ---
-
+// --- HEADER BYPASS (for Google Translate only) ---
 async function setupHeaderRules() {
   try {
     const oldRules = await chrome.declarativeNetRequest.getDynamicRules();
@@ -123,7 +98,6 @@ async function setupHeaderRules() {
 }
 
 // --- INIT ---
-
 chrome.runtime.onInstalled.addListener(() => {
   setupHeaderRules();
   chrome.storage.local.get(['activeLanguages', 'bubblesBurst', 'isEnabled', 'maxResultsPerLang'], (res) => {
@@ -147,7 +121,6 @@ function classifyQuery(query) {
   const lower = q.toLowerCase();
   const words = lower.split(/\s+/).filter(w => w.length > 0);
 
-  // Check known entities
   if (KNOWN_ENTITIES.has(lower)) return { translate: false, query: q, reason: 'known_entity' };
   for (const entity of KNOWN_ENTITIES) {
     if (entity.includes(' ') && lower.includes(entity)) {
@@ -155,10 +128,8 @@ function classifyQuery(query) {
     }
   }
 
-  // Single word → don't translate (likely proper noun)
   if (words.length === 1) return { translate: false, query: q, reason: 'single_word' };
 
-  // 2-word with at least one uncommon word → don't translate
   const commonWords = new Set([
     'how', 'what', 'why', 'when', 'where', 'who', 'which', 'best', 'top',
     'good', 'bad', 'new', 'old', 'big', 'small', 'fast', 'slow', 'easy',
@@ -171,7 +142,6 @@ function classifyQuery(query) {
     return { translate: false, query: q, reason: 'short_mixed' };
   }
 
-  // Multi-word natural language → translate
   return { translate: true, query: q, reason: 'natural_language' };
 }
 
@@ -201,66 +171,49 @@ function detectScript(text) {
   return maxScript;
 }
 
-/**
- * Classify whether a video is in the target language.
- * Returns { match: boolean, confidence: number, detectedLang: string, source: string }
- */
 function classifyVideoLanguage(title, description, targetLangCode) {
   const targetIso3 = ISO2_TO_ISO3[targetLangCode] || targetLangCode;
   const targetScript = LANG_SCRIPTS[targetLangCode] || 'latin';
   const combinedText = `${title} ${description || ''}`.trim();
 
-  // Step 1: Script-based detection for non-Latin target languages
   if (targetScript !== 'latin') {
     const script = detectScript(title);
     if (script === targetScript) {
-      // Script matches — this is very strong evidence for non-Latin languages
       return { match: true, confidence: 0.9, detectedLang: targetLangCode, source: 'script' };
     }
     if (script === 'latin') {
-      // Title is Latin but target is non-Latin → likely English, reject
       return { match: false, confidence: 0.85, detectedLang: 'en', source: 'script_mismatch' };
     }
-    // Mixed or other script
     if (script !== 'unknown') {
       return { match: false, confidence: 0.6, detectedLang: 'other', source: 'script_other' };
     }
   }
 
-  // Step 2: franc trigram detection (best for Latin-script languages)
   if (combinedText.length >= 10) {
     const allLangs = francAll(combinedText);
-    // allLangs is sorted by confidence: [['fra', 1], ['eng', 0.8], ...]
 
     if (allLangs.length > 0 && allLangs[0][0] !== 'und') {
       const topLang = allLangs[0][0]; // ISO 639-3
       const topScore = allLangs[0][1];
 
-      // Find the target language's score
       const targetEntry = allLangs.find(([code]) => code === targetIso3);
       const targetScore = targetEntry ? targetEntry[1] : 0;
 
-      // Find English score
       const engEntry = allLangs.find(([code]) => code === 'eng');
       const engScore = engEntry ? engEntry[1] : 0;
 
-      // If target language is the top prediction
       if (topLang === targetIso3) {
         return { match: true, confidence: topScore, detectedLang: targetLangCode, source: 'franc_top' };
       }
 
-      // If target language has reasonable score and is above English
       if (targetScore > 0.3 && targetScore > engScore) {
         return { match: true, confidence: targetScore, detectedLang: targetLangCode, source: 'franc_above_en' };
       }
 
-      // If English is top and target is Latin-script, this is likely English content
       if (topLang === 'eng' && engScore > 0.5) {
         return { match: false, confidence: engScore, detectedLang: 'en', source: 'franc_english' };
       }
 
-      // If neither target nor English is strong, it might be a related language
-      // For Latin-script targets, be lenient if English isn't dominant
       if (targetScript === 'latin' && engScore < 0.4) {
         return { match: true, confidence: 0.4, detectedLang: targetLangCode, source: 'franc_non_english' };
       }
@@ -269,10 +222,8 @@ function classifyVideoLanguage(title, description, targetLangCode) {
     }
   }
 
-  // Step 3: Text too short for franc — fall back to script + heuristics
   const script = detectScript(combinedText);
   if (targetScript === 'latin' && script === 'latin') {
-    // Can't determine — moderate confidence, accept
     return { match: true, confidence: 0.35, detectedLang: 'unknown', source: 'short_text_latin' };
   }
 
@@ -283,11 +234,9 @@ function isLikelyEnglish(title, description) {
   const text = `${title} ${description || ''}`.trim();
   if (text.length < 5) return false;
 
-  // Script check first
   const script = detectScript(title);
   if (script !== 'latin' && script !== 'unknown') return false;
 
-  // franc check
   if (text.length >= 10) {
     const detected = franc(text);
     return detected === 'eng';
@@ -297,95 +246,237 @@ function isLikelyEnglish(title, description) {
 }
 
 // ============================================================
-// MODULE 3: INNERTUBE SEARCH
+// MODULE 3: DIRECT SEARCH & SCRAPING BACKEND
 // ============================================================
 
-async function searchInnerTube(query, langCode, region, page = 1) {
-  const gl = region || LANG_TO_REGION[langCode] || 'US';
-  const yt = await getInnerTubeClient(langCode, gl);
-  const cacheKey = `${query}_${langCode}_${gl}`;
+function extractYtInitialData(html) {
+  const marker = 'var ytInitialData = ';
+  const startIdx = html.indexOf(marker);
+  if (startIdx === -1) {
+    const altMarker = 'window["ytInitialData"] = ';
+    const altStartIdx = html.indexOf(altMarker);
+    if (altStartIdx === -1) return null;
+    
+    const remaining = html.substring(altStartIdx + altMarker.length);
+    const endIdx = remaining.indexOf(';</script>');
+    if (endIdx === -1) return null;
+    return JSON.parse(remaining.substring(0, endIdx));
+  }
+  
+  const remaining = html.substring(startIdx + marker.length);
+  const endIdx = remaining.indexOf(';</script>');
+  if (endIdx === -1) {
+    const semiIdx = remaining.indexOf(';');
+    if (semiIdx === -1) return null;
+    return JSON.parse(remaining.substring(0, semiIdx));
+  }
+  return JSON.parse(remaining.substring(0, endIdx));
+}
 
-  let searchResult;
+function parseVideoRenderer(vr) {
+  const videoId = vr.videoId;
+  const title = vr.title?.runs?.map(r => r.text).join('') || vr.title?.simpleText || '';
+  const description = vr.detailedMetadataSnippets?.[0]?.snippetText?.runs?.map(r => r.text).join('') || vr.descriptionSnippet?.runs?.map(r => r.text).join('') || '';
+  const author = vr.ownerText?.runs?.map(r => r.text).join('') || '';
+  const authorUrl = vr.ownerText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.canonicalBaseUrl || 
+                    vr.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || '';
+  const viewCountText = vr.viewCountText?.simpleText || vr.viewCountText?.runs?.map(r => r.text).join('') || '';
+  const publishedText = vr.publishedTimeText?.simpleText || '';
+  const durationText = vr.lengthText?.simpleText || '';
+
+  // Parse view count
+  let views = 0;
+  const viewMatch = viewCountText.replace(/[,.\s]/g, '').match(/(\d+)/);
+  if (viewMatch) views = parseInt(viewMatch[1], 10);
+
+  // Parse duration to seconds
+  let lengthSeconds = 0;
+  if (durationText) {
+    const parts = durationText.split(':').map(Number);
+    if (parts.length === 3) lengthSeconds = parts[0] * 3600 + parts[1] * 60 + (parts[2] || 0);
+    else if (parts.length === 2) lengthSeconds = parts[0] * 60 + (parts[1] || 0);
+  }
+
+  return {
+    id: videoId,
+    title,
+    originalTitle: title,
+    translatedTitle: '',
+    description,
+    thumbnail: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+    author,
+    authorUrl: (authorUrl && authorUrl.startsWith('http')) ? authorUrl : (authorUrl ? `https://www.youtube.com${authorUrl}` : ''),
+    lengthText: durationText,
+    lengthSeconds,
+    viewsText: viewCountText,
+    views,
+    publishedText,
+    publishedSeconds: parsePublishedTextToSeconds(publishedText),
+    source: 'youtube'
+  };
+}
+
+async function fetchSearchPage(query, langCode, region) {
+  const gl = region || LANG_TO_REGION[langCode] || 'US';
+  const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&gl=${gl}&hl=${langCode}`;
+  
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      'Accept-Language': `${langCode},en-US;q=0.9,en;q=0.8`
+    }
+  });
+  if (!response.ok) throw new Error(`YouTube results page fetch failed: ${response.status}`);
+  const html = await response.text();
+  return { html, gl };
+}
+
+async function fetchContinuation(apiKey, token, langCode, region) {
+  const postUrl = `https://www.youtube.com/youtubei/v1/search?key=${apiKey}&prettyPrint=false`;
+  const payload = {
+    context: {
+      client: {
+        clientName: 'WEB',
+        clientVersion: '2.20260308.00.00',
+        gl: region,
+        hl: langCode,
+        utcOffsetMinutes: 0
+      }
+    },
+    continuation: token
+  };
+  const response = await fetch(postUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) throw new Error(`YouTube continuation POST failed: ${response.status}`);
+  return await response.json();
+}
+
+async function searchYouTube(query, langCode, region, page = 1) {
+  const gl = region || LANG_TO_REGION[langCode] || 'US';
+  const cacheKey = `${query}_${langCode}_${gl}`;
+  const videos = [];
+  let nextToken = null;
+
   try {
     if (page === 1) {
-      searchResult = await yt.search(query, { type: 'video' });
-      activeSearches[cacheKey] = { page: 1, search: searchResult };
-    } else {
-      const cached = activeSearches[cacheKey];
-      if (cached && cached.page === page - 1 && cached.search.has_continuation) {
-        console.log(`[BB] Advancing continuation for ${langCode}/${gl} to page ${page}`);
-        searchResult = await cached.search.getContinuation();
-        activeSearches[cacheKey] = { page, search: searchResult };
-      } else {
-        console.log(`[BB] Cache miss or restart. Reconstructing continuation for ${langCode}/${gl} to page ${page}`);
-        let currentSearch = await yt.search(query, { type: 'video' });
-        for (let p = 2; p <= page; p++) {
-          if (currentSearch.has_continuation) {
-            currentSearch = await currentSearch.getContinuation();
-          } else {
-            break;
+      console.log(`[BB] Querying native page 1 search for "${query}" (lang: ${langCode}, gl: ${gl})`);
+      const { html } = await fetchSearchPage(query, langCode, gl);
+      const data = extractYtInitialData(html);
+      if (!data) throw new Error('Could not parse ytInitialData from YouTube HTML');
+
+      const keyMatch = html.match(/"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"/);
+      const apiKey = keyMatch ? keyMatch[1] : null;
+
+      // Extract initial videos
+      const contents = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents;
+      if (contents) {
+        for (const section of contents) {
+          const itemSection = section.itemSectionRenderer;
+          if (!itemSection || !itemSection.contents) continue;
+          for (const item of itemSection.contents) {
+            if (item.videoRenderer) {
+              videos.push(parseVideoRenderer(item.videoRenderer));
+            }
           }
         }
-        searchResult = currentSearch;
-        activeSearches[cacheKey] = { page, search: searchResult };
+        
+        // Find continuation token
+        const lastItem = contents[contents.length - 1];
+        if (lastItem && lastItem.continuationItemRenderer) {
+          nextToken = lastItem.continuationItemRenderer.continuationEndpoint?.continuationCommand?.token;
+        }
+      }
+
+      activeSearches[cacheKey] = { page: 1, apiKey, token: nextToken };
+    } else {
+      const cached = activeSearches[cacheKey];
+      if (cached && cached.page === page - 1 && cached.token && cached.apiKey) {
+        console.log(`[BB] Querying native continuation page ${page} for "${query}"`);
+        const responseJson = await fetchContinuation(cached.apiKey, cached.token, langCode, gl);
+        
+        const items = responseJson.onResponseReceivedCommands?.[0]?.appendContinuationItemsAction?.continuationItems ||
+                      responseJson.continuationContents?.searchContinuation?.contents;
+        
+        if (items) {
+          for (const item of items) {
+            if (item.itemSectionRenderer && item.itemSectionRenderer.contents) {
+              for (const subItem of item.itemSectionRenderer.contents) {
+                if (subItem.videoRenderer) {
+                  videos.push(parseVideoRenderer(subItem.videoRenderer));
+                }
+              }
+            } else if (item.videoRenderer) {
+              videos.push(parseVideoRenderer(item.videoRenderer));
+            } else if (item.continuationItemRenderer) {
+              nextToken = item.continuationItemRenderer.continuationEndpoint?.continuationCommand?.token;
+            }
+          }
+        }
+        activeSearches[cacheKey] = { page, apiKey: cached.apiKey, token: nextToken };
+      } else {
+        // Cache miss/restart: reconstruct continuation chain
+        console.log(`[BB] Cache miss or restart. Reconstructing continuation chain for ${langCode}/${gl} to page ${page}`);
+        const { html } = await fetchSearchPage(query, langCode, gl);
+        const data = extractYtInitialData(html);
+        if (!data) throw new Error('Could not parse ytInitialData from YouTube HTML');
+        const keyMatch = html.match(/"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"/);
+        const apiKey = keyMatch ? keyMatch[1] : null;
+        
+        const contents = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents;
+        let token = null;
+        if (contents) {
+          const lastItem = contents[contents.length - 1];
+          if (lastItem && lastItem.continuationItemRenderer) {
+            token = lastItem.continuationItemRenderer.continuationEndpoint?.continuationCommand?.token;
+          }
+        }
+
+        let currentPageVideos = [];
+        let currentToken = token;
+        
+        // Loop to traverse continuation tokens sequentially
+        for (let p = 2; p <= page; p++) {
+          if (!currentToken || !apiKey) break;
+          const responseJson = await fetchContinuation(apiKey, currentToken, langCode, gl);
+          currentPageVideos = [];
+          currentToken = null;
+          
+          const items = responseJson.onResponseReceivedCommands?.[0]?.appendContinuationItemsAction?.continuationItems ||
+                        responseJson.continuationContents?.searchContinuation?.contents;
+          if (items) {
+            for (const item of items) {
+              if (item.itemSectionRenderer && item.itemSectionRenderer.contents) {
+                for (const subItem of item.itemSectionRenderer.contents) {
+                  if (subItem.videoRenderer) {
+                    currentPageVideos.push(parseVideoRenderer(subItem.videoRenderer));
+                  }
+                }
+              } else if (item.videoRenderer) {
+                currentPageVideos.push(parseVideoRenderer(item.videoRenderer));
+              } else if (item.continuationItemRenderer) {
+                currentToken = item.continuationItemRenderer.continuationEndpoint?.continuationCommand?.token;
+              }
+            }
+          }
+        }
+        
+        videos.push(...currentPageVideos);
+        activeSearches[cacheKey] = { page, apiKey, token: currentToken };
       }
     }
   } catch (err) {
-    console.error(`[BB] InnerTube search/continuation failed for ${langCode}/${gl} page ${page}:`, err);
+    console.error(`[BB] YouTube scrape search failed for ${langCode}/${gl} page ${page}:`, err);
     throw err;
   }
 
-  const videos = [];
-
-  // Iterate through parsed search results using the .videos getter
-  if (searchResult && searchResult.videos) {
-    for (const item of searchResult.videos) {
-      const videoId = item.id;
-      if (!videoId) continue;
-
-      const title = item.title?.text || item.title?.toString() || '';
-      const description = item.description_snippet?.text || item.description?.toString() || '';
-      const author = item.author?.name || '';
-      const authorUrl = item.author?.url || '';
-      const viewCountText = item.view_count?.text || item.short_view_count?.text || '';
-      const publishedText = item.published?.text || '';
-      const durationText = item.duration?.text || item.length_text?.text || '';
-
-      // Parse view count
-      let views = 0;
-      const viewMatch = viewCountText.replace(/[,.\s]/g, '').match(/(\d+)/);
-      if (viewMatch) views = parseInt(viewMatch[1], 10);
-
-      // Parse duration to seconds
-      let lengthSeconds = item.duration?.seconds || 0;
-      if (!lengthSeconds && durationText) {
-        const parts = durationText.split(':').map(Number);
-        if (parts.length === 3) lengthSeconds = parts[0] * 3600 + parts[1] * 60 + (parts[2] || 0);
-        else if (parts.length === 2) lengthSeconds = parts[0] * 60 + (parts[1] || 0);
-      }
-
-      videos.push({
-        id: videoId,
-        title,
-        originalTitle: title,
-        translatedTitle: '',
-        description,
-        thumbnail: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-        author,
-        authorUrl: (authorUrl && authorUrl.startsWith('http')) ? authorUrl : (authorUrl ? `https://www.youtube.com${authorUrl}` : ''),
-        lengthText: durationText,
-        lengthSeconds,
-        viewsText: viewCountText,
-        views,
-        publishedText,
-        publishedSeconds: parsePublishedTextToSeconds(publishedText),
-        source: 'innertube'
-      });
-    }
-  }
-
-  console.log(`[BB] InnerTube ${langCode}/${gl} (page ${page}): got ${videos.length} verified videos`);
-  return { videos, searchResult };
+  console.log(`[BB] YouTube results: got ${videos.length} raw videos for ${langCode}/${gl}`);
+  return videos;
 }
 
 // ============================================================
@@ -438,7 +529,6 @@ async function processGlobalSearch(searchQuery, page = 1) {
   if (searchQuery !== lastSearchQuery) {
     globalSeenIds = new Set();
     lastSearchQuery = searchQuery;
-    // Clear the continuation cache for the new query
     for (const key in activeSearches) {
       delete activeSearches[key];
     }
@@ -469,7 +559,7 @@ async function processGlobalSearch(searchQuery, page = 1) {
     console.log(`[BB] Translations:`, translatedQueries);
   }
 
-  // Step 3: Search each language via InnerTube
+  // Step 3: Search each language
   const fetchPromises = activeLangs.map(async (lang) => {
     const region = lang.region || LANG_TO_REGION[lang.code] || 'US';
     const searchQ = queryInfo.translate ? (translatedQueries[lang.code] || searchQuery) : searchQuery;
@@ -477,18 +567,17 @@ async function processGlobalSearch(searchQuery, page = 1) {
     let rawVideos = [];
 
     try {
-      const result = await searchInnerTube(searchQ, lang.code, region, page);
-      rawVideos = result.videos;
+      rawVideos = await searchYouTube(searchQ, lang.code, region, page);
 
       // Also search original query if translation was used (catches proper nouns in translated queries)
       if (queryInfo.translate && searchQ.toLowerCase() !== searchQuery.toLowerCase()) {
         try {
-          const origResult = await searchInnerTube(searchQuery, lang.code, region, page);
-          rawVideos = [...rawVideos, ...origResult.videos];
+          const origVideos = await searchYouTube(searchQuery, lang.code, region, page);
+          rawVideos = [...rawVideos, ...origVideos];
         } catch (e) { /* supplementary failed, continue */ }
       }
     } catch (err) {
-      console.error(`[BB] InnerTube search failed for ${lang.name}:`, err.message);
+      console.error(`[BB] YouTube search failed for ${lang.name}:`, err.message);
       return [];
     }
 
@@ -505,13 +594,12 @@ async function processGlobalSearch(searchQuery, page = 1) {
     // Tag with language metadata
     uniqueVideos.forEach(v => { v.language = lang; v.queryUsed = searchQ; });
 
-    // Batch translate titles (for display + language detection of Latin-script languages)
+    // Batch translate titles
     if (lang.code !== 'en') {
       await batchTranslateTitles(uniqueVideos, lang.code);
     }
 
-    // Step 4: LANGUAGE DETECTION — the core of the "new style"
-    // Run franc + script analysis on every result, only keep confident matches
+    // Step 4: LANGUAGE DETECTION
     const langFiltered = [];
     for (const v of uniqueVideos) {
       const classification = classifyVideoLanguage(v.title, v.description, lang.code);
@@ -525,7 +613,6 @@ async function processGlobalSearch(searchQuery, page = 1) {
     }
 
     console.log(`[BB] ${lang.name}: ${rawVideos.length} raw → ${uniqueVideos.length} unique → ${langFiltered.length} lang-verified`);
-
     return langFiltered.slice(0, maxResults);
   });
 
@@ -563,23 +650,6 @@ function parsePublishedTextToSeconds(text) {
   const m = { second: 1, minute: 60, hour: 3600, day: 86400, week: 604800, month: 2592000, year: 31536000 };
   for (const [k, mult] of Object.entries(m)) { if (unit.startsWith(k)) return val * mult; }
   return val;
-}
-
-function formatDuration(sec) {
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
-  const parts = [];
-  if (h > 0) parts.push(h);
-  parts.push(m.toString().padStart(h > 0 ? 2 : 1, '0'));
-  parts.push(s.toString().padStart(2, '0'));
-  return parts.join(':');
-}
-
-function formatViews(num) {
-  if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M views';
-  if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K views';
-  return num + ' views';
 }
 
 // ============================================================
