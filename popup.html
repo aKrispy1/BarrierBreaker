@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-wrapper">
+    <!-- Header -->
+    <div class="header">
+      <div class="logo-group">
+        <!-- Sleek Pastel SVG Logo -->
+        <svg class="logo-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="20" height="20">
+          <circle cx="68" cy="68" r="36" fill="none" stroke="rgba(255,107,139,0.3)" stroke-width="3" stroke-dasharray="6 4" />
+          <circle cx="60" cy="60" r="36" fill="rgba(255,255,255,0.03)" stroke="#06d6a0" stroke-width="4" />
+          <path d="M60 24v72M24 60h72" stroke="rgba(6,214,160,0.4)" stroke-width="2" />
+          <path d="M35 93 L93 35" stroke="#ff6b8b" stroke-width="5" stroke-linecap="round" />
+          <path d="M80 35 H93 V48" fill="none" stroke="#ff6b8b" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" />
+        </svg>
+        <h1 class="title">BarrierBreaker</h1>
+      </div>
+      
+      <!-- Power Toggle -->
+      <div class="switch-container">
+        <label class="switch">
+          <input type="checkbox" id="power-toggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Statistics Card -->
+    <div class="stat-card">
+      <div class="stat-label">Bubbles Burst (Global discoveries clicked)</div>
+      <div class="stat-val" id="click-counter">0</div>
+    </div>
+
+    <!-- Language Config -->
+    <div class="section-title">Discovery Languages</div>
+    <div class="lang-list" id="languages-container">
+      <!-- Rendered dynamically via popup.js -->
+    </div>
+
+    <!-- Query Options -->
+    <div class="setting-row">
+      <span class="setting-label">Max results per language</span>
+      <input type="number" id="max-results" class="setting-input" min="1" max="5" value="2">
+    </div>
+
+    <!-- Proxy Nodes Config -->
+    <div class="section-title">Proxy Instances (Invidious)</div>
+    <textarea id="proxies-input" class="proxy-textarea" placeholder="https://instance1.com&#10;https://instance2.com" spellcheck="false"></textarea>
+
+    <!-- Action Buttons -->
+    <div class="btn-container">
+      <button id="save-btn" class="btn-action">Save Config</button>
+      <button id="reset-btn" class="btn-action btn-secondary">Reset</button>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="status-toast" class="status-toast">Config Saved Successfully</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

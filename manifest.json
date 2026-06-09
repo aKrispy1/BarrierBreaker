@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "BarrierBreaker",
+  "version": "1.0.0",
+  "description": "Break out of your algorithmic YouTube bubble. Localizes searches globally in high-contrast brutalist liquid glass.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "https://translate.googleapis.com/*",
+    "https://yewtu.be/*",
+    "https://invidious.flokinet.to/*",
+    "https://invidious.projectsegfau.lt/*",
+    "https://invidious.privacydev.net/*",
+    "https://invidious.lunar.icu/*",
+    "https://invidious.nerdvpn.de/*",
+    "https://inv.tux.im/*",
+    "https://invidious.fdn.fr/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.svg",
+      "32": "icon.svg",
+      "48": "icon.svg",
+      "128": "icon.svg"
+    }
+  },
+  "icons": {
+    "16": "icon.svg",
+    "32": "icon.svg",
+    "48": "icon.svg",
+    "128": "icon.svg"
+  }
+}

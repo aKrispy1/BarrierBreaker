@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Brutalist Square Background -->
+  <rect width="128" height="128" fill="#0A0A0A" rx="0" />
+  
+  <!-- Thick Neon Green Border -->
+  <rect x="4" y="4" width="120" height="120" fill="none" stroke="#39FF14" stroke-width="6" rx="0" />
+  
+  <!-- Offset Shadow Ring (Brutalist style) -->
+  <circle cx="68" cy="68" r="36" fill="none" stroke="#FF6EC7" stroke-width="4" stroke-dasharray="8 6" />
+  
+  <!-- Main Globe/Bubble Ring -->
+  <circle cx="60" cy="60" r="36" fill="#1A1A1A" stroke="#00F0FF" stroke-width="5" />
+  
+  <!-- Globe Meridians -->
+  <path d="M60 24v72M24 60h72" stroke="#00F0FF" stroke-width="3" />
+  <path d="M32 40c10 5 15 15 15 20s-5 15-15 20M88 40c-10 5-15 15-15 20s5 15 15 20" fill="none" stroke="#00F0FF" stroke-width="2" />
+  
+  <!-- Breakout Diagonal Arrow (Sharp Brutalist) -->
+  <path d="M35 93 L93 35" stroke="#39FF14" stroke-width="8" stroke-linecap="square" />
+  <path d="M75 35 H93 V53" fill="none" stroke="#39FF14" stroke-width="8" stroke-linejoin="miter" stroke-linecap="square" />
+</svg>
