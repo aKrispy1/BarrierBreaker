@@ -19,6 +19,10 @@ const DEFAULT_INSTANCES = [
 
 const RULE_ID = 1;
 
+// Track globally seen video IDs to prevent cross-page duplicates
+let globalSeenIds = new Set();
+let lastSearchQuery = '';
+
 async function setupHeaderRules() {
   try {
     const oldRules = await chrome.declarativeNetRequest.getDynamicRules();
@@ -45,7 +49,8 @@ async function setupHeaderRules() {
             "invidious.flokinet.to", 
             "invidious.privacydev.net", 
             "invidious.lunar.icu", 
-            "invidious.fdn.fr"
+            "invidious.fdn.fr",
+            "inv.thepixora.com"
           ],
           resourceTypes: ["xmlhttprequest"]
         }
@@ -71,12 +76,16 @@ chrome.runtime.onInstalled.addListener(() => {
     if (!res.invidiousInstances) updates.invidiousInstances = DEFAULT_INSTANCES;
     if (res.bubblesBurst === undefined) updates.bubblesBurst = 0;
     if (res.isEnabled === undefined) updates.isEnabled = true;
-    if (!res.maxResultsPerLang) updates.maxResultsPerLang = 10;
+    if (!res.maxResultsPerLang) updates.maxResultsPerLang = 15;
     
     if (Object.keys(updates).length > 0) {
       chrome.storage.local.set(updates);
     }
   });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  setupHeaderRules();
 });
 
 // Helper to convert relative publish time (e.g. "3 days ago") to seconds for sorting
@@ -96,10 +105,6 @@ function parsePublishedTextToSeconds(text) {
   return val * multiplier;
 }
 
-chrome.runtime.onStartup.addListener(() => {
-  setupHeaderRules();
-});
-
 // Translation Helper
 async function translateText(text, from, to) {
   const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
@@ -107,8 +112,12 @@ async function translateText(text, from, to) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    if (data && data[0] && data[0][0] && data[0][0][0]) {
-      return data[0][0][0];
+    // Concatenate all translation segments
+    if (data && data[0]) {
+      return data[0]
+        .filter(seg => seg && seg[0])
+        .map(seg => seg[0])
+        .join('');
     }
     throw new Error('Invalid structure');
   } catch (err) {
@@ -117,53 +126,96 @@ async function translateText(text, from, to) {
   }
 }
 
-// Fetch results from a specific Invidious instance
-async function fetchInvidiousResults(instance, query, langCode, page = 1) {
-  const url = `${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video&hl=${langCode}&page=${page}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} from ${instance}`);
-  const data = await res.json();
-  if (!Array.isArray(data)) throw new Error(`Invalid data type from ${instance}`);
-  return data;
+// Detect if a query is likely a proper noun/brand name that shouldn't be translated
+function isLikelyProperNoun(original, translated) {
+  const origLower = original.trim().toLowerCase();
+  const transLower = translated.trim().toLowerCase();
+  
+  // If the translation is identical to the original (or near-identical), it's a proper noun
+  // that the translator didn't change
+  if (origLower === transLower) return true;
+  
+  // If the original is a single word and gets translated to something completely different,
+  // it's likely a proper noun being mistranslated (e.g., "Valorant" -> "勇敢な")
+  const origWords = origLower.split(/\s+/).filter(w => w.length > 0);
+  if (origWords.length === 1 && origLower.length > 3) {
+    // Check if translated text contains no latin characters at all — likely a dictionary translation
+    const hasLatin = /[a-zA-Z]/.test(translated);
+    if (!hasLatin) return true;
+  }
+  
+  return false;
 }
 
-// Keyword relevance filter to remove dictionary translation errors (like brand names being translated to common words)
-function filterByRelevance(videos, originalQuery, translatedQuery) {
-  const stopWords = new Set(['the', 'and', 'a', 'of', 'in', 'to', 'for', 'is', 'with', 'on', 'at', 'by', 'an']);
+// Fetch results from a specific Invidious instance with timeout
+async function fetchInvidiousResults(instance, query, langCode, page = 1) {
+  const url = `${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video&hl=${langCode}&page=${page}`;
   
-  // Extract search keywords, ignoring short words and symbols
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 second timeout
+  
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (!res.ok) throw new Error(`HTTP ${res.status} from ${instance}`);
+    const data = await res.json();
+    if (!Array.isArray(data)) throw new Error(`Invalid data type from ${instance}`);
+    return data;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}
+
+// Detect English content by analyzing the title text
+function isLikelyEnglish(title) {
+  if (!title || title.length === 0) return false;
+  
+  // Count Latin characters vs total characters (excluding spaces, numbers, symbols)
+  const letters = title.replace(/[\s\d\p{P}\p{S}]/gu, '');
+  if (letters.length === 0) return false;
+  
+  const latinChars = (letters.match(/[a-zA-Z]/g) || []).length;
+  const latinRatio = latinChars / letters.length;
+  
+  // If >85% of letter characters are Latin, likely English
+  // This catches English titles even on non-English Invidious instances
+  return latinRatio > 0.85;
+}
+
+// Keyword relevance filter — verifies search results actually match what the user searched for
+function filterByRelevance(videos, originalQuery, translatedQuery) {
+  const stopWords = new Set(['the', 'and', 'a', 'of', 'in', 'to', 'for', 'is', 'with', 'on', 'at', 'by', 'an', 'it', 'or', 'as', 'be', 'this', 'that', 'are', 'was', 'but', 'not', 'you', 'all', 'can', 'her', 'had', 'do', 'my', 'he', 'she', 'we', 'me']);
+  
+  // Extract search keywords, ignoring stop words and very short words
   const getKeywords = (q) => {
     if (!q) return [];
     return q.toLowerCase()
       .split(/[\s,.\-\/]+/)
-      .map(w => w.replace(/[^\w\s\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uff9f\u4e00-\u9faf\u0400-\u04ff]/g, '').trim())
+      .map(w => w.replace(/[^\w\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uff9f\u4e00-\u9faf\u0400-\u04ff\u0600-\u06ff]/g, '').trim())
       .filter(w => w.length >= 2 && !stopWords.has(w));
   };
 
   const originalKeywords = getKeywords(originalQuery);
   const translatedKeywords = getKeywords(translatedQuery);
   
-  // If we have no keywords (e.g. search was empty or too short), don't filter
+  // If we have no usable keywords, don't filter
   if (originalKeywords.length === 0 && translatedKeywords.length === 0) return videos;
 
   return videos.filter(v => {
-    const titleLower = v.title.toLowerCase();
+    const titleLower = (v.title || '').toLowerCase();
     const transTitleLower = (v.translatedTitle || '').toLowerCase();
-    const channelLower = v.author.toLowerCase();
+    const channelLower = (v.author || '').toLowerCase();
+    const descLower = (v.description || '').toLowerCase();
     
-    // Check if original keywords are in the video title or channel name
-    const matchesOriginal = originalKeywords.some(kw => 
-      titleLower.includes(kw) || 
-      transTitleLower.includes(kw) || 
-      channelLower.includes(kw)
-    );
+    // Check ALL searchable text fields
+    const allText = `${titleLower} ${transTitleLower} ${channelLower} ${descLower}`;
     
-    // Check if translated keywords are in the video title or channel name
-    const matchesTranslated = translatedKeywords.some(kw => 
-      titleLower.includes(kw) || 
-      transTitleLower.includes(kw) || 
-      channelLower.includes(kw)
-    );
+    // Must match at least one original keyword (the user's actual search term)
+    const matchesOriginal = originalKeywords.some(kw => allText.includes(kw));
+    
+    // OR match at least one translated keyword
+    const matchesTranslated = translatedKeywords.some(kw => allText.includes(kw));
 
     return matchesOriginal || matchesTranslated;
   });
@@ -171,6 +223,12 @@ function filterByRelevance(videos, originalQuery, translatedQuery) {
 
 // Handle execution of localized search
 async function processGlobalSearch(searchQuery, page = 1) {
+  // Reset global seen IDs if the search query changed
+  if (searchQuery !== lastSearchQuery) {
+    globalSeenIds = new Set();
+    lastSearchQuery = searchQuery;
+  }
+  
   // 1. Get configurations
   const store = await new Promise((resolve) => {
     chrome.storage.local.get(['activeLanguages', 'invidiousInstances', 'maxResultsPerLang', 'excludeEnglish'], resolve);
@@ -178,48 +236,51 @@ async function processGlobalSearch(searchQuery, page = 1) {
   
   const activeLangs = store.activeLanguages || DEFAULT_LANGUAGES;
   const instances = store.invidiousInstances || DEFAULT_INSTANCES;
-  const maxResults = store.maxResultsPerLang || 10;
+  const maxResults = store.maxResultsPerLang || 15;
   const excludeEnglish = store.excludeEnglish || false;
   
   if (activeLangs.length === 0) return [];
 
   // 2. Perform translations in parallel
-  console.log(`[BarrierBreaker] Translating query: "${searchQuery}"`);
+  console.log(`[BarrierBreaker] Translating query: "${searchQuery}" for page ${page}`);
   const translationPromises = activeLangs.map(async (lang) => {
     try {
       const translated = await translateText(searchQuery, 'en', lang.code);
-      return { lang, translated };
+      const properNoun = isLikelyProperNoun(searchQuery, translated);
+      return { lang, translated, properNoun };
     } catch (e) {
-      return { lang, translated: searchQuery }; // Fallback to english
+      return { lang, translated: searchQuery, properNoun: true };
     }
   });
   
   const translations = await Promise.all(translationPromises);
   
   // 3. Concurrently fetch search results from rotating Invidious instances
-  // We balance the instances across the active languages
-  const fetchPromises = translations.map(async ({ lang, translated }, index) => {
+  const fetchPromises = translations.map(async ({ lang, translated, properNoun }, index) => {
     const primaryInstanceIdx = index % instances.length;
-    let success = false;
     let rawItems = [];
     let usedInstance = '';
 
-    // We query both: the translated query AND the original English query
-    // This solves brand name/proper noun translation errors (e.g. searching "Valorant" in Japan)
-    const queriesToTry = [translated];
-    if (translated.toLowerCase() !== searchQuery.toLowerCase()) {
-      queriesToTry.push(searchQuery);
+    // Build list of queries to try:
+    // - ALWAYS search with the original English query (catches proper nouns, brands, games)
+    // - If the translation is different AND not a proper noun, also search with the translated query
+    const queriesToFetch = [searchQuery]; // Original query always first
+    if (!properNoun && translated.toLowerCase() !== searchQuery.toLowerCase()) {
+      queriesToFetch.push(translated);
     }
     
-    // Try primary instance, then try fallbacks if it fails
-    for (let i = 0; i < Math.min(3, instances.length); i++) {
+    console.log(`[BarrierBreaker] ${lang.name}: Queries = ${JSON.stringify(queriesToFetch)}, ProperNoun=${properNoun}`);
+    
+    // Try instances with fallback rotation
+    let success = false;
+    for (let i = 0; i < Math.min(instances.length, 5); i++) {
       const instanceIdx = (primaryInstanceIdx + i) % instances.length;
       const instance = instances[instanceIdx];
       try {
-        console.log(`[BarrierBreaker] Fetching page ${page} for ${lang.name} using ${instance}`);
+        console.log(`[BarrierBreaker] Fetching page ${page} for ${lang.name} from ${instance}`);
         
-        // Fetch queries concurrently from the same instance
-        const results = await Promise.all(queriesToTry.map(q => 
+        // Fetch all queries concurrently from the same instance
+        const results = await Promise.all(queriesToFetch.map(q => 
           fetchInvidiousResults(instance, q, lang.code, page)
             .catch(e => {
               console.warn(`Query "${q}" failed on ${instance}:`, e.message);
@@ -227,7 +288,7 @@ async function processGlobalSearch(searchQuery, page = 1) {
             })
         ));
         
-        // Merge and flatten
+        // Merge and flatten all query results
         rawItems = results.flat();
         usedInstance = instance;
         success = true;
@@ -238,35 +299,34 @@ async function processGlobalSearch(searchQuery, page = 1) {
     }
     
     if (!success || rawItems.length === 0) {
-      console.error(`All attempts failed for language ${lang.name}`);
+      console.warn(`[BarrierBreaker] All attempts failed for language ${lang.name}`);
       return [];
     }
 
     // Format items
     const videos = rawItems
       .filter(item => item.type === 'video' && item.videoId)
-      .map(v => {
-        return {
-          id: v.videoId,
-          title: v.title,
-          originalTitle: v.title,
-          translatedTitle: '', // will be populated
-          thumbnail: `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`, // Official YouTube CDN (Bypasses CSP blocks)
-          author: v.author,
-          authorUrl: v.authorUrl || `https://www.youtube.com/channel/${v.authorId}`,
-          lengthText: v.lengthSeconds ? formatDuration(v.lengthSeconds) : '',
-          lengthSeconds: v.lengthSeconds || 0,
-          viewsText: v.viewCount ? formatViews(v.viewCount) : '',
-          views: v.viewCount || 0, // numeric views for sorting
-          publishedText: v.publishedText || '',
-          publishedSeconds: parsePublishedTextToSeconds(v.publishedText), // numeric age for sorting
-          language: lang,
-          queryUsed: translated,
-          instanceUsed: usedInstance
-        };
-      });
+      .map(v => ({
+        id: v.videoId,
+        title: v.title,
+        originalTitle: v.title,
+        translatedTitle: '', // will be populated via batch translation
+        thumbnail: `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
+        author: v.author || '',
+        authorUrl: v.authorUrl || `https://www.youtube.com/channel/${v.authorId}`,
+        lengthText: v.lengthSeconds ? formatDuration(v.lengthSeconds) : '',
+        lengthSeconds: v.lengthSeconds || 0,
+        viewsText: v.viewCount ? formatViews(v.viewCount) : '',
+        views: v.viewCount || 0,
+        publishedText: v.publishedText || '',
+        publishedSeconds: parsePublishedTextToSeconds(v.publishedText),
+        language: lang,
+        queryUsed: translated,
+        instanceUsed: usedInstance,
+        description: v.description || ''
+      }));
 
-    // Deduplicate within this language list by video ID
+    // Deduplicate within this language by video ID
     const seenLocalIds = new Set();
     const uniqueVideos = videos.filter(v => {
       if (seenLocalIds.has(v.id)) return false;
@@ -274,43 +334,50 @@ async function processGlobalSearch(searchQuery, page = 1) {
       return true;
     });
 
-    // Translate video titles back to English in a single batch request
+    // Batch translate video titles back to English
     if (lang.code !== 'en' && uniqueVideos.length > 0) {
       try {
-        const textToTranslate = uniqueVideos.map(v => v.originalTitle).join('\n');
-        const translatedText = await translateText(textToTranslate, lang.code, 'en');
-        const translatedTitles = translatedText.split('\n').map(t => t.trim());
-        
-        if (translatedTitles.length === uniqueVideos.length) {
-          uniqueVideos.forEach((v, idx) => {
-            const trans = translatedTitles[idx];
-            if (trans && trans.toLowerCase() !== v.originalTitle.toLowerCase()) {
-              v.translatedTitle = trans;
-            }
-          });
-        } else {
-          // Fallback to individual translations if counts mismatch
-          console.warn(`[BarrierBreaker] Batch translation count mismatch (${translatedTitles.length} vs ${uniqueVideos.length}). Using fallbacks.`);
-          await Promise.all(uniqueVideos.map(async (v) => {
-            try {
-              const trans = await translateText(v.originalTitle, lang.code, 'en');
+        // Batch in groups of 25 to avoid URL length limits
+        const batchSize = 25;
+        for (let batchStart = 0; batchStart < uniqueVideos.length; batchStart += batchSize) {
+          const batch = uniqueVideos.slice(batchStart, batchStart + batchSize);
+          const textToTranslate = batch.map(v => v.originalTitle).join('\n');
+          const translatedText = await translateText(textToTranslate, lang.code, 'en');
+          const translatedTitles = translatedText.split('\n').map(t => t.trim());
+          
+          if (translatedTitles.length === batch.length) {
+            batch.forEach((v, idx) => {
+              const trans = translatedTitles[idx];
               if (trans && trans.toLowerCase() !== v.originalTitle.toLowerCase()) {
                 v.translatedTitle = trans;
               }
-            } catch (e) {
-              console.warn(`Failed translating title:`, e);
-            }
-          }));
+            });
+          } else {
+            // Fallback: individual translations for mismatched batch
+            console.warn(`[BarrierBreaker] Batch mismatch for ${lang.name}: got ${translatedTitles.length} vs ${batch.length}`);
+            await Promise.all(batch.map(async (v) => {
+              try {
+                const trans = await translateText(v.originalTitle, lang.code, 'en');
+                if (trans && trans.toLowerCase() !== v.originalTitle.toLowerCase()) {
+                  v.translatedTitle = trans;
+                }
+              } catch (e) {
+                // Silent fail for individual title
+              }
+            }));
+          }
         }
       } catch (err) {
         console.warn(`Failed batch translating titles for ${lang.name}:`, err);
       }
     }
 
-    // Apply strict relevance filtering to screen out translation mistakes
+    // Apply relevance filter to ensure results match the search query
     const relevantVideos = filterByRelevance(uniqueVideos, searchQuery, translated);
+    
+    console.log(`[BarrierBreaker] ${lang.name}: ${rawItems.length} raw -> ${uniqueVideos.length} unique -> ${relevantVideos.length} relevant`);
 
-    // Slice to max results after filtering to ensure we don't truncate early
+    // Return up to maxResults per language
     return relevantVideos.slice(0, maxResults);
   });
 
@@ -319,25 +386,25 @@ async function processGlobalSearch(searchQuery, page = 1) {
   // Aggregate and flatten
   let aggregatedResults = resultsByLang.flat();
   
-  // Exclude English videos if configured
+  // Exclude English videos if configured  
   if (excludeEnglish) {
     aggregatedResults = aggregatedResults.filter(v => {
-      // If original language is not English, but back-translation to English resulted in no change 
-      // (v.translatedTitle is empty), we classify it as an English video.
-      if (v.language.code !== 'en' && !v.translatedTitle) {
+      // Check if the video title is predominantly English text
+      if (isLikelyEnglish(v.originalTitle)) {
         return false;
       }
       return true;
     });
   }
   
-  // Deduplicate by video ID just in case
-  const seenIds = new Set();
+  // Deduplicate by video ID (across languages AND across pages)
   const deduplicated = aggregatedResults.filter(v => {
-    if (seenIds.has(v.id)) return false;
-    seenIds.add(v.id);
+    if (globalSeenIds.has(v.id)) return false;
+    globalSeenIds.add(v.id);
     return true;
   });
+
+  console.log(`[BarrierBreaker] Final: ${aggregatedResults.length} aggregated -> ${deduplicated.length} after dedup (global seen: ${globalSeenIds.size})`);
 
   return deduplicated;
 }
@@ -375,6 +442,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       const page = message.page || 1;
+      
+      // If page is 1, reset global dedup set for fresh search
+      if (page === 1) {
+        globalSeenIds = new Set();
+        lastSearchQuery = message.query;
+      }
+      
       processGlobalSearch(message.query, page)
         .then(videos => {
           sendResponse({ success: true, videos });
@@ -394,6 +468,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: true, count: current + 1 });
       });
     });
+    return true;
+  }
+  
+  if (message.type === 'RESET_DEDUP') {
+    globalSeenIds = new Set();
+    lastSearchQuery = '';
+    sendResponse({ success: true });
     return true;
   }
 });

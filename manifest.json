@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "BarrierBreaker",
   "version": "1.0.0",
-  "description": "Break out of your algorithmic YouTube bubble. Localizes searches globally in high-contrast brutalist liquid glass.",
+  "description": "Break out of your algorithmic YouTube bubble. Surfaces global, language-agnostic content via decentralized proxy nodes.",
   "permissions": [
     "storage",
     "declarativeNetRequest"
@@ -10,6 +10,7 @@
   "host_permissions": [
     "*://*.youtube.com/*",
     "https://translate.googleapis.com/*",
+    "https://inv.thepixora.com/*",
     "https://yewtu.be/*",
     "https://invidious.flokinet.to/*",
     "https://invidious.projectsegfau.lt/*",

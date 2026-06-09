@@ -12,7 +12,6 @@ let isFetchingMore = false;
 let layoutMode = 'grid'; // 'grid' or 'list'
 let sortBy = 'relevance'; // 'relevance', 'views', 'date'
 let durationFilter = 'any'; // 'any', 'short', 'medium', 'long'
-let visibleCount = 6; // Pagination count
 
 // Sleek Pastel SVG Logo (matches icon.svg style)
 const LOGO_SVG = `
@@ -85,7 +84,6 @@ async function setupDiscoveryLayer(query) {
   console.log(`[BarrierBreaker] Intercepted query: "${query}". Initiating global search.`);
 
   // Wait for the container to appear in the DOM
-  // We target the main results column #primary inside ytd-search (Desktop)
   const targetSelector = 'ytd-search #primary';
   let parent = document.querySelector(targetSelector);
   
@@ -124,7 +122,7 @@ async function setupDiscoveryLayer(query) {
       <div class="bb-loading-bar-container">
         <div class="bb-loading-bar"></div>
       </div>
-      <div style="font-size: 11px; color: var(--bb-text-secondary); margin-top: 14px; opacity: 0.8;">
+      <div class="bb-loading-status" id="bb-loading-status">
         Translating query to regional languages & routing via decentralized proxy nodes
       </div>
     </div>
@@ -141,10 +139,10 @@ async function setupDiscoveryLayer(query) {
     parent.appendChild(container);
   }
 
-  // Request results from background script with try-catch validation
+  // Request results from background script
   try {
     if (!isContextValid()) return;
-    chrome.runtime.sendMessage({ type: 'FETCH_GLOBAL_RESULTS', query: query }, (response) => {
+    chrome.runtime.sendMessage({ type: 'FETCH_GLOBAL_RESULTS', query: query, page: 1 }, (response) => {
       isInjecting = false;
       
       if (!isContextValid()) return;
@@ -175,8 +173,7 @@ async function setupDiscoveryLayer(query) {
       activeFilters.clear();
       currentVideos.forEach(v => activeFilters.add(v.language.code));
       
-      // Reset visible pagination on new search
-      visibleCount = 6;
+      // Reset pagination on new search
       currentPage = 1;
       isFetchingMore = false;
 
@@ -366,6 +363,13 @@ function renderDiscoveryGrid(container) {
   controlsRow.appendChild(searchOptions);
   
   header.appendChild(controlsRow);
+  
+  // Result count info
+  const resultInfo = document.createElement('div');
+  resultInfo.className = 'bb-result-count';
+  resultInfo.id = 'bb-result-count';
+  header.appendChild(resultInfo);
+  
   container.appendChild(header);
 
   // 3. Create Grid/List wrapper
@@ -425,13 +429,17 @@ function renderCards(grid, footer) {
   if (sortBy === 'views') {
     processed.sort((a, b) => b.views - a.views);
   } else if (sortBy === 'date') {
-    processed.sort((a, b) => a.publishedSeconds - b.publishedSeconds); // Ascending: smaller seconds = newer
+    processed.sort((a, b) => a.publishedSeconds - b.publishedSeconds);
   }
 
-  // 4. Page Slicing (Pagination)
-  const visibleVideos = processed.slice(0, visibleCount);
+  // Update result count
+  const countEl = document.getElementById('bb-result-count');
+  if (countEl) {
+    countEl.textContent = `${processed.length} global results loaded • Page ${currentPage}`;
+  }
 
-  if (visibleVideos.length === 0) {
+  // Render ALL processed videos (no client-side pagination limit — show everything loaded)
+  if (processed.length === 0) {
     grid.innerHTML = `
       <div style="grid-column: 1/-1; text-align: center; padding: 48px; font-size: 13px; color: var(--bb-text-secondary); border: 1px dashed rgba(128,128,128,0.2); border-radius: 12px; background: rgba(255,255,255,0.01);">
         No matching global videos found. Adjust your active languages or filters.
@@ -440,7 +448,7 @@ function renderCards(grid, footer) {
     return;
   }
 
-  visibleVideos.forEach(v => {
+  processed.forEach(v => {
     const card = document.createElement('a');
     card.href = `/watch?v=${v.id}`;
     card.className = `bb-card bb-lang-${v.language.code}`;
@@ -487,26 +495,14 @@ function renderCards(grid, footer) {
     grid.appendChild(card);
   });
 
-  // 5. Render "Show More" Pagination Button
-  if (visibleCount < processed.length) {
-    const showMoreBtn = document.createElement('button');
-    showMoreBtn.className = 'bb-show-more-btn';
-    showMoreBtn.textContent = `Show More (${processed.length - visibleCount} remaining)`;
-    showMoreBtn.addEventListener('click', () => {
-      visibleCount += 6;
-      renderCards(grid, footer);
-    });
-    footer.appendChild(showMoreBtn);
-  } else {
-    // All locally loaded items are displayed. Show option to fetch page Y from servers
-    const loadMoreBtn = document.createElement('button');
-    loadMoreBtn.className = 'bb-show-more-btn';
-    loadMoreBtn.textContent = `Load More Results (Page ${currentPage + 1})`;
-    loadMoreBtn.addEventListener('click', () => {
-      loadNextPageFromServer(grid, footer);
-    });
-    footer.appendChild(loadMoreBtn);
-  }
+  // Always show "Load More Results" button for infinite discovery
+  const loadMoreBtn = document.createElement('button');
+  loadMoreBtn.className = 'bb-show-more-btn';
+  loadMoreBtn.textContent = `Load More Results`;
+  loadMoreBtn.addEventListener('click', () => {
+    loadNextPageFromServer(grid, footer);
+  });
+  footer.appendChild(loadMoreBtn);
 }
 
 function loadNextPageFromServer(grid, footer) {
@@ -517,6 +513,7 @@ function loadNextPageFromServer(grid, footer) {
   if (loadMoreBtn) {
     loadMoreBtn.textContent = 'Loading more global results...';
     loadMoreBtn.disabled = true;
+    loadMoreBtn.classList.add('loading');
   }
   
   currentPage++;
@@ -539,6 +536,7 @@ function loadNextPageFromServer(grid, footer) {
         if (loadMoreBtn) {
           loadMoreBtn.textContent = 'Failed to load. Click to retry';
           loadMoreBtn.disabled = false;
+          loadMoreBtn.classList.remove('loading');
         }
         currentPage--;
         return;
@@ -547,28 +545,30 @@ function loadNextPageFromServer(grid, footer) {
       const newVideos = response.videos || [];
       if (newVideos.length === 0) {
         if (loadMoreBtn) {
-          loadMoreBtn.textContent = 'No further results available';
+          loadMoreBtn.textContent = 'No further results available — try different filters';
           loadMoreBtn.disabled = true;
+          loadMoreBtn.classList.remove('loading');
         }
         return;
       }
       
-      // Append and deduplicate by video ID against existing loaded videos
-      const seenIds = new Set(currentVideos.map(v => v.id));
+      // Append unique videos (dedup already handled server-side via globalSeenIds)
+      const existingIds = new Set(currentVideos.map(v => v.id));
+      let newCount = 0;
       newVideos.forEach(v => {
-        if (!seenIds.has(v.id)) {
+        if (!existingIds.has(v.id)) {
           currentVideos.push(v);
-          seenIds.add(v.id);
+          existingIds.add(v.id);
+          newCount++;
         }
       });
       
       // Add any new languages returned on this page to activeFilters
       newVideos.forEach(v => activeFilters.add(v.language.code));
       
-      // Increment visibleCount to display the new row
-      visibleCount += 6;
+      console.log(`[BarrierBreaker] Added ${newCount} new videos from page ${currentPage}. Total: ${currentVideos.length}`);
       
-      // Re-render
+      // Re-render everything
       renderCards(grid, footer);
     });
   } catch (err) {

@@ -48,7 +48,7 @@ function loadConfig() {
     document.getElementById('click-counter').textContent = res.bubblesBurst || 0;
     
     // 3. Set Max results
-    document.getElementById('max-results').value = res.maxResultsPerLang || 2;
+    document.getElementById('max-results').value = res.maxResultsPerLang || 15;
     document.getElementById('exclude-english-toggle').checked = res.excludeEnglish || false;
     
     // 4. Render Languages List
@@ -112,7 +112,7 @@ function saveConfig() {
   // 3. Get max results
   let maxResults = parseInt(document.getElementById('max-results').value, 10);
   if (isNaN(maxResults) || maxResults < 1) maxResults = 1;
-  if (maxResults > 5) maxResults = 5;
+  if (maxResults > 50) maxResults = 50;
   document.getElementById('max-results').value = maxResults;
   
   // 4. Get proxies
@@ -147,7 +147,7 @@ function resetConfig() {
     isEnabled: true,
     activeLanguages: DEFAULT_LANGUAGES,
     invidiousInstances: DEFAULT_INSTANCES,
-    maxResultsPerLang: 2,
+    maxResultsPerLang: 15,
     excludeEnglish: false
   }, () => {
     showToast('Reset to Defaults');
