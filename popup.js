@@ -1,13 +1,13 @@
 // All supported languages with their names and glassmorphic pastel accents
 const LANGUAGE_PRESETS = [
-  { code: 'ja', name: 'Japanese', accent: '#ff6b8b' },
-  { code: 'es', name: 'Spanish', accent: '#ffd166' },
-  { code: 'ru', name: 'Russian', accent: '#06d6a0' },
-  { code: 'ar', name: 'Arabic', accent: '#118ab2' },
-  { code: 'fr', name: 'French', accent: '#8338ec' },
-  { code: 'de', name: 'German', accent: '#f77f00' },
-  { code: 'zh', name: 'Chinese', accent: '#2ec4b6' },
-  { code: 'hi', name: 'Hindi', accent: '#ff007f' }
+  { code: 'ja', name: 'Japanese', accent: '#ff6b8b', region: 'JP' },
+  { code: 'es', name: 'Spanish', accent: '#ffd166', region: 'ES' },
+  { code: 'ru', name: 'Russian', accent: '#06d6a0', region: 'RU' },
+  { code: 'ar', name: 'Arabic', accent: '#118ab2', region: 'SA' },
+  { code: 'fr', name: 'French', accent: '#8338ec', region: 'FR' },
+  { code: 'de', name: 'German', accent: '#f77f00', region: 'DE' },
+  { code: 'zh', name: 'Chinese', accent: '#2ec4b6', region: 'TW' },
+  { code: 'hi', name: 'Hindi', accent: '#ff007f', region: 'IN' }
 ];
 
 const DEFAULT_LANGUAGES = LANGUAGE_PRESETS.slice(0, 5); // ja, es, ru, ar, fr

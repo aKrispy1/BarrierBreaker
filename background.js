@@ -1,11 +1,19 @@
 // Default settings
 const DEFAULT_LANGUAGES = [
-  { code: 'ja', name: 'Japanese', accent: '#ff6b8b' },
-  { code: 'es', name: 'Spanish', accent: '#ffd166' },
-  { code: 'ru', name: 'Russian', accent: '#06d6a0' },
-  { code: 'ar', name: 'Arabic', accent: '#118ab2' },
-  { code: 'fr', name: 'French', accent: '#8338ec' }
+  { code: 'ja', name: 'Japanese', accent: '#ff6b8b', region: 'JP' },
+  { code: 'es', name: 'Spanish', accent: '#ffd166', region: 'ES' },
+  { code: 'ru', name: 'Russian', accent: '#06d6a0', region: 'RU' },
+  { code: 'ar', name: 'Arabic', accent: '#118ab2', region: 'SA' },
+  { code: 'fr', name: 'French', accent: '#8338ec', region: 'FR' }
 ];
+
+// Language code → region code mapping for all supported languages
+const LANG_TO_REGION = {
+  'ja': 'JP', 'es': 'ES', 'ru': 'RU', 'ar': 'SA', 'fr': 'FR',
+  'de': 'DE', 'zh': 'TW', 'hi': 'IN', 'ko': 'KR', 'pt': 'BR',
+  'it': 'IT', 'tr': 'TR', 'pl': 'PL', 'nl': 'NL', 'vi': 'VN',
+  'th': 'TH', 'id': 'ID', 'uk': 'UA', 'sv': 'SE', 'cs': 'CZ'
+};
 
 const DEFAULT_INSTANCES = [
   'https://inv.thepixora.com',
@@ -44,13 +52,13 @@ async function setupHeaderRules() {
           urlFilter: "*",
           domains: [
             "translate.googleapis.com", 
+            "inv.thepixora.com",
             "yewtu.be", 
             "invidious.projectsegfau.lt", 
             "invidious.flokinet.to", 
             "invidious.privacydev.net", 
             "invidious.lunar.icu", 
-            "invidious.fdn.fr",
-            "inv.thepixora.com"
+            "invidious.fdn.fr"
           ],
           resourceTypes: ["xmlhttprequest"]
         }
@@ -105,14 +113,13 @@ function parsePublishedTextToSeconds(text) {
   return val * multiplier;
 }
 
-// Translation Helper
+// Translation Helper — concatenates all segments for proper full-text translation
 async function translateText(text, from, to) {
   const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    // Concatenate all translation segments
     if (data && data[0]) {
       return data[0]
         .filter(seg => seg && seg[0])
@@ -122,37 +129,92 @@ async function translateText(text, from, to) {
     throw new Error('Invalid structure');
   } catch (err) {
     console.error(`Translation error (${from} -> ${to}):`, err);
-    return text; // Return original text on failure
+    return text;
   }
 }
 
-// Detect if a query is likely a proper noun/brand name that shouldn't be translated
-function isLikelyProperNoun(original, translated) {
-  const origLower = original.trim().toLowerCase();
-  const transLower = translated.trim().toLowerCase();
+// Detect language of a title by checking its script/character composition
+function detectTitleLanguage(title) {
+  if (!title || title.length === 0) return 'unknown';
   
-  // If the translation is identical to the original (or near-identical), it's a proper noun
-  // that the translator didn't change
-  if (origLower === transLower) return true;
+  // Remove common neutral characters: digits, punctuation, symbols, spaces
+  const letters = title.replace(/[\s\d\p{P}\p{S}]/gu, '');
+  if (letters.length === 0) return 'unknown';
   
-  // If the original is a single word and gets translated to something completely different,
-  // it's likely a proper noun being mistranslated (e.g., "Valorant" -> "勇敢な")
-  const origWords = origLower.split(/\s+/).filter(w => w.length > 0);
-  if (origWords.length === 1 && origLower.length > 3) {
-    // Check if translated text contains no latin characters at all — likely a dictionary translation
-    const hasLatin = /[a-zA-Z]/.test(translated);
-    if (!hasLatin) return true;
+  const latinChars = (letters.match(/[a-zA-ZÀ-ÿĀ-žŒœ]/g) || []).length;
+  const cyrillicChars = (letters.match(/[\u0400-\u04ff]/g) || []).length;
+  const arabicChars = (letters.match(/[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]/g) || []).length;
+  const cjkChars = (letters.match(/[\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uff9f\u4e00-\u9faf\u3400-\u4dbf]/g) || []).length;
+  const devanagariChars = (letters.match(/[\u0900-\u097f]/g) || []).length;
+  const total = letters.length;
+  
+  if (cjkChars / total > 0.3) return 'cjk'; // Japanese/Chinese/Korean
+  if (cyrillicChars / total > 0.3) return 'cyrillic'; // Russian
+  if (arabicChars / total > 0.3) return 'arabic';
+  if (devanagariChars / total > 0.3) return 'devanagari'; // Hindi
+  if (latinChars / total > 0.7) return 'latin'; // English/French/Spanish/German etc.
+  
+  return 'mixed';
+}
+
+// Check if a title is likely in the target language vs English
+// For non-Latin script languages (Japanese, Russian, Arabic, Hindi) this is easy — check script
+// For Latin script languages (French, Spanish, German) we check for language-specific patterns
+function isTitleInTargetLanguage(title, langCode) {
+  const script = detectTitleLanguage(title);
+  
+  // Non-Latin script languages: if the title uses their script at all, it counts
+  if (['ja', 'zh', 'ko'].includes(langCode)) return script === 'cjk' || script === 'mixed';
+  if (langCode === 'ru' || langCode === 'uk') return script === 'cyrillic' || script === 'mixed';
+  if (langCode === 'ar') return script === 'arabic' || script === 'mixed';
+  if (langCode === 'hi') return script === 'devanagari' || script === 'mixed';
+  
+  // Latin script languages (French, Spanish, German, etc.): 
+  // We can't easily distinguish from English by script alone.
+  // Accept all Latin-script titles — the relevance filter will handle quality.
+  if (['fr', 'es', 'de', 'pt', 'it', 'nl', 'sv', 'pl', 'cs', 'tr', 'vi', 'id'].includes(langCode)) {
+    return script === 'latin' || script === 'mixed';
+  }
+  
+  return true; // Default: accept
+}
+
+// Check if a title is likely English (for the Exclude English filter)
+function isLikelyEnglish(title, translatedTitle, langCode) {
+  if (!title) return false;
+  
+  const script = detectTitleLanguage(title);
+  
+  // Non-Latin scripts: definitely not English
+  if (['cjk', 'cyrillic', 'arabic', 'devanagari'].includes(script)) return false;
+  
+  // For non-Latin target languages: if title is all Latin text, it's likely English
+  if (['ja', 'zh', 'ko', 'ru', 'uk', 'ar', 'hi'].includes(langCode)) {
+    if (script === 'latin') return true;
+  }
+  
+  // For Latin-script target languages: check if back-translation didn't change the title
+  // If translating FROM the target language TO English produces the same text, it was English
+  if (['fr', 'es', 'de', 'pt', 'it', 'nl', 'sv', 'pl', 'cs', 'tr', 'vi', 'id'].includes(langCode)) {
+    if (translatedTitle && translatedTitle.toLowerCase().trim() === title.toLowerCase().trim()) {
+      return true; // Back-translation identical = was already English
+    }
+    // If no translated title was generated, the translation was identical = English
+    if (!translatedTitle || translatedTitle === '') return true;
   }
   
   return false;
 }
 
-// Fetch results from a specific Invidious instance with timeout
-async function fetchInvidiousResults(instance, query, langCode, page = 1) {
-  const url = `${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video&hl=${langCode}&page=${page}`;
+// Fetch results from a specific Invidious instance with timeout and REGION parameter
+async function fetchInvidiousResults(instance, query, langCode, region, page = 1) {
+  // The critical fix: use `region` parameter to get content from the target country
+  // The `hl` parameter only changes UI language, `region` changes actual results
+  const regionParam = region || LANG_TO_REGION[langCode] || '';
+  const url = `${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video&page=${page}${regionParam ? `&region=${regionParam}` : ''}`;
   
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
   
   try {
     const res = await fetch(url, { signal: controller.signal });
@@ -167,27 +229,10 @@ async function fetchInvidiousResults(instance, query, langCode, page = 1) {
   }
 }
 
-// Detect English content by analyzing the title text
-function isLikelyEnglish(title) {
-  if (!title || title.length === 0) return false;
-  
-  // Count Latin characters vs total characters (excluding spaces, numbers, symbols)
-  const letters = title.replace(/[\s\d\p{P}\p{S}]/gu, '');
-  if (letters.length === 0) return false;
-  
-  const latinChars = (letters.match(/[a-zA-Z]/g) || []).length;
-  const latinRatio = latinChars / letters.length;
-  
-  // If >85% of letter characters are Latin, likely English
-  // This catches English titles even on non-English Invidious instances
-  return latinRatio > 0.85;
-}
-
-// Keyword relevance filter — verifies search results actually match what the user searched for
+// Keyword relevance filter — verifies results match what the user searched for
 function filterByRelevance(videos, originalQuery, translatedQuery) {
   const stopWords = new Set(['the', 'and', 'a', 'of', 'in', 'to', 'for', 'is', 'with', 'on', 'at', 'by', 'an', 'it', 'or', 'as', 'be', 'this', 'that', 'are', 'was', 'but', 'not', 'you', 'all', 'can', 'her', 'had', 'do', 'my', 'he', 'she', 'we', 'me']);
   
-  // Extract search keywords, ignoring stop words and very short words
   const getKeywords = (q) => {
     if (!q) return [];
     return q.toLowerCase()
@@ -199,22 +244,15 @@ function filterByRelevance(videos, originalQuery, translatedQuery) {
   const originalKeywords = getKeywords(originalQuery);
   const translatedKeywords = getKeywords(translatedQuery);
   
-  // If we have no usable keywords, don't filter
   if (originalKeywords.length === 0 && translatedKeywords.length === 0) return videos;
 
   return videos.filter(v => {
     const titleLower = (v.title || '').toLowerCase();
     const transTitleLower = (v.translatedTitle || '').toLowerCase();
     const channelLower = (v.author || '').toLowerCase();
-    const descLower = (v.description || '').toLowerCase();
+    const allText = `${titleLower} ${transTitleLower} ${channelLower}`;
     
-    // Check ALL searchable text fields
-    const allText = `${titleLower} ${transTitleLower} ${channelLower} ${descLower}`;
-    
-    // Must match at least one original keyword (the user's actual search term)
     const matchesOriginal = originalKeywords.some(kw => allText.includes(kw));
-    
-    // OR match at least one translated keyword
     const matchesTranslated = translatedKeywords.some(kw => allText.includes(kw));
 
     return matchesOriginal || matchesTranslated;
@@ -241,35 +279,40 @@ async function processGlobalSearch(searchQuery, page = 1) {
   
   if (activeLangs.length === 0) return [];
 
-  // 2. Perform translations in parallel
+  // 2. Translate the search query into each target language
   console.log(`[BarrierBreaker] Translating query: "${searchQuery}" for page ${page}`);
   const translationPromises = activeLangs.map(async (lang) => {
     try {
       const translated = await translateText(searchQuery, 'en', lang.code);
-      const properNoun = isLikelyProperNoun(searchQuery, translated);
-      return { lang, translated, properNoun };
+      return { lang, translated };
     } catch (e) {
-      return { lang, translated: searchQuery, properNoun: true };
+      return { lang, translated: searchQuery };
     }
   });
   
   const translations = await Promise.all(translationPromises);
   
-  // 3. Concurrently fetch search results from rotating Invidious instances
-  const fetchPromises = translations.map(async ({ lang, translated, properNoun }, index) => {
+  // 3. Fetch results for each language using REGION parameter + translated query
+  const fetchPromises = translations.map(async ({ lang, translated }, index) => {
+    const region = lang.region || LANG_TO_REGION[lang.code] || '';
     const primaryInstanceIdx = index % instances.length;
-    let rawItems = [];
+    let allRawItems = [];
     let usedInstance = '';
 
-    // Build list of queries to try:
-    // - ALWAYS search with the original English query (catches proper nouns, brands, games)
-    // - If the translation is different AND not a proper noun, also search with the translated query
-    const queriesToFetch = [searchQuery]; // Original query always first
-    if (!properNoun && translated.toLowerCase() !== searchQuery.toLowerCase()) {
-      queriesToFetch.push(translated);
+    // Build query list:
+    // 1. Always search with TRANSLATED query + region (gets native language results)
+    // 2. Also search ORIGINAL query + region (catches proper nouns like "Valorant" used globally)
+    const queriesToFetch = [];
+    
+    // Translated query first (this is the main discovery mechanism)
+    queriesToFetch.push(translated);
+    
+    // Also search original if it's different from translation
+    if (translated.toLowerCase() !== searchQuery.toLowerCase()) {
+      queriesToFetch.push(searchQuery);
     }
     
-    console.log(`[BarrierBreaker] ${lang.name}: Queries = ${JSON.stringify(queriesToFetch)}, ProperNoun=${properNoun}`);
+    console.log(`[BarrierBreaker] ${lang.name} (region=${region}): Queries = ${JSON.stringify(queriesToFetch)}`);
     
     // Try instances with fallback rotation
     let success = false;
@@ -277,19 +320,18 @@ async function processGlobalSearch(searchQuery, page = 1) {
       const instanceIdx = (primaryInstanceIdx + i) % instances.length;
       const instance = instances[instanceIdx];
       try {
-        console.log(`[BarrierBreaker] Fetching page ${page} for ${lang.name} from ${instance}`);
+        console.log(`[BarrierBreaker] Fetching page ${page} for ${lang.name} from ${instance} (region=${region})`);
         
-        // Fetch all queries concurrently from the same instance
+        // Fetch all queries concurrently from the same instance, WITH REGION
         const results = await Promise.all(queriesToFetch.map(q => 
-          fetchInvidiousResults(instance, q, lang.code, page)
+          fetchInvidiousResults(instance, q, lang.code, region, page)
             .catch(e => {
               console.warn(`Query "${q}" failed on ${instance}:`, e.message);
               return [];
             })
         ));
         
-        // Merge and flatten all query results
-        rawItems = results.flat();
+        allRawItems = results.flat();
         usedInstance = instance;
         success = true;
         break;
@@ -298,19 +340,19 @@ async function processGlobalSearch(searchQuery, page = 1) {
       }
     }
     
-    if (!success || rawItems.length === 0) {
+    if (!success || allRawItems.length === 0) {
       console.warn(`[BarrierBreaker] All attempts failed for language ${lang.name}`);
       return [];
     }
 
     // Format items
-    const videos = rawItems
+    const videos = allRawItems
       .filter(item => item.type === 'video' && item.videoId)
       .map(v => ({
         id: v.videoId,
-        title: v.title,
-        originalTitle: v.title,
-        translatedTitle: '', // will be populated via batch translation
+        title: v.title || '',
+        originalTitle: v.title || '',
+        translatedTitle: '',
         thumbnail: `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
         author: v.author || '',
         authorUrl: v.authorUrl || `https://www.youtube.com/channel/${v.authorId}`,
@@ -334,10 +376,9 @@ async function processGlobalSearch(searchQuery, page = 1) {
       return true;
     });
 
-    // Batch translate video titles back to English
+    // Batch translate video titles back to English (for display)
     if (lang.code !== 'en' && uniqueVideos.length > 0) {
       try {
-        // Batch in groups of 25 to avoid URL length limits
         const batchSize = 25;
         for (let batchStart = 0; batchStart < uniqueVideos.length; batchStart += batchSize) {
           const batch = uniqueVideos.slice(batchStart, batchStart + batchSize);
@@ -353,7 +394,6 @@ async function processGlobalSearch(searchQuery, page = 1) {
               }
             });
           } else {
-            // Fallback: individual translations for mismatched batch
             console.warn(`[BarrierBreaker] Batch mismatch for ${lang.name}: got ${translatedTitles.length} vs ${batch.length}`);
             await Promise.all(batch.map(async (v) => {
               try {
@@ -361,9 +401,7 @@ async function processGlobalSearch(searchQuery, page = 1) {
                 if (trans && trans.toLowerCase() !== v.originalTitle.toLowerCase()) {
                   v.translatedTitle = trans;
                 }
-              } catch (e) {
-                // Silent fail for individual title
-              }
+              } catch (e) { /* silent */ }
             }));
           }
         }
@@ -372,12 +410,11 @@ async function processGlobalSearch(searchQuery, page = 1) {
       }
     }
 
-    // Apply relevance filter to ensure results match the search query
+    // Apply relevance filter
     const relevantVideos = filterByRelevance(uniqueVideos, searchQuery, translated);
     
-    console.log(`[BarrierBreaker] ${lang.name}: ${rawItems.length} raw -> ${uniqueVideos.length} unique -> ${relevantVideos.length} relevant`);
+    console.log(`[BarrierBreaker] ${lang.name}: ${allRawItems.length} raw -> ${uniqueVideos.length} unique -> ${relevantVideos.length} relevant`);
 
-    // Return up to maxResults per language
     return relevantVideos.slice(0, maxResults);
   });
 
@@ -388,13 +425,11 @@ async function processGlobalSearch(searchQuery, page = 1) {
   
   // Exclude English videos if configured  
   if (excludeEnglish) {
+    const beforeCount = aggregatedResults.length;
     aggregatedResults = aggregatedResults.filter(v => {
-      // Check if the video title is predominantly English text
-      if (isLikelyEnglish(v.originalTitle)) {
-        return false;
-      }
-      return true;
+      return !isLikelyEnglish(v.originalTitle, v.translatedTitle, v.language.code);
     });
+    console.log(`[BarrierBreaker] Exclude English: ${beforeCount} -> ${aggregatedResults.length} (removed ${beforeCount - aggregatedResults.length})`);
   }
   
   // Deduplicate by video ID (across languages AND across pages)
@@ -409,7 +444,7 @@ async function processGlobalSearch(searchQuery, page = 1) {
   return deduplicated;
 }
 
-// Format duration helper (seconds -> HH:MM:SS or MM:SS)
+// Format duration helper
 function formatDuration(sec) {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
@@ -443,7 +478,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       const page = message.page || 1;
       
-      // If page is 1, reset global dedup set for fresh search
       if (page === 1) {
         globalSeenIds = new Set();
         lastSearchQuery = message.query;
@@ -458,7 +492,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ success: false, error: err.message });
         });
     });
-    return true; // Keep message channel open for async response
+    return true;
   }
   
   if (message.type === 'TRACK_CLICK') {
