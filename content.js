@@ -4,16 +4,17 @@ let lastUrl = '';
 let isInjecting = false;
 let currentVideos = [];
 let activeFilters = new Set(); // Set of active language codes
-let checkUrlInterval = null;
 
-// Helper to verify if extension context has been invalidated (e.g. extension was reloaded)
-function isContextValid() {
-  return typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id;
-}
+// Search & Sorting States
+let layoutMode = 'grid'; // 'grid' or 'list'
+let sortBy = 'relevance'; // 'relevance', 'views', 'date'
+let durationFilter = 'any'; // 'any', 'short', 'medium', 'long'
+let visibleCount = 6; // Pagination count
+let checkUrlInterval = null;
 
 // Sleek Pastel SVG Logo (matches icon.svg style)
 const LOGO_SVG = `
-<svg class="bb-logo-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="28" height="28">
+<svg class="bb-logo-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="26" height="26">
   <circle cx="68" cy="68" r="36" fill="none" stroke="rgba(255,107,139,0.3)" stroke-width="3" stroke-dasharray="6 4" />
   <circle cx="60" cy="60" r="36" fill="rgba(255,255,255,0.03)" stroke="#06d6a0" stroke-width="4" />
   <path d="M60 24v72M24 60h72" stroke="rgba(6,214,160,0.4)" stroke-width="2" />
@@ -21,6 +22,11 @@ const LOGO_SVG = `
   <path d="M80 35 H93 V48" fill="none" stroke="#ff6b8b" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" />
 </svg>
 `;
+
+// Helper to verify if extension context has been invalidated (e.g. extension was reloaded)
+function isContextValid() {
+  return typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id;
+}
 
 // Start checking URL changes
 function init() {
@@ -166,6 +172,9 @@ async function setupDiscoveryLayer(query) {
       // Populate active filters with all returned languages
       activeFilters.clear();
       currentVideos.forEach(v => activeFilters.add(v.language.code));
+      
+      // Reset visible pagination on new search
+      visibleCount = 6;
 
       renderDiscoveryGrid(container);
     });
@@ -231,14 +240,47 @@ function renderDiscoveryGrid(container) {
     </div>
   `;
   
+  // Layout Selector Toggles
+  const viewToggle = document.createElement('div');
+  viewToggle.className = 'bb-view-toggle';
+  
+  const gridBtn = document.createElement('button');
+  gridBtn.className = `bb-view-btn ${layoutMode === 'grid' ? 'active' : ''}`;
+  gridBtn.textContent = 'Grid';
+  gridBtn.addEventListener('click', () => {
+    if (layoutMode === 'grid') return;
+    layoutMode = 'grid';
+    gridBtn.classList.add('active');
+    listBtn.classList.remove('active');
+    updateGridLayout();
+  });
+  
+  const listBtn = document.createElement('button');
+  listBtn.className = `bb-view-btn ${layoutMode === 'list' ? 'active' : ''}`;
+  listBtn.textContent = 'List';
+  listBtn.addEventListener('click', () => {
+    if (layoutMode === 'list') return;
+    layoutMode = 'list';
+    listBtn.classList.add('active');
+    gridBtn.classList.remove('active');
+    updateGridLayout();
+  });
+  
+  viewToggle.appendChild(gridBtn);
+  viewToggle.appendChild(listBtn);
+  
   headerRow.appendChild(titleGroup);
+  headerRow.appendChild(viewToggle);
   header.appendChild(headerRow);
 
-  // 2. Create Language Filter Bar
+  // 2. Filter & Sort controls row
+  const controlsRow = document.createElement('div');
+  controlsRow.className = 'bb-controls-row';
+
+  // Language selectors list
   const filterBar = document.createElement('div');
   filterBar.className = 'bb-filter-bar';
   
-  // Get unique languages present in our video list
   const languagesPresent = [];
   const seenLangs = new Set();
   currentVideos.forEach(v => {
@@ -248,7 +290,7 @@ function renderDiscoveryGrid(container) {
     }
   });
 
-  // "Toggle All" button
+  // Toggle all languages
   const allBtn = document.createElement('button');
   allBtn.className = 'bb-filter-btn';
   allBtn.textContent = 'Toggle All';
@@ -259,12 +301,11 @@ function renderDiscoveryGrid(container) {
     } else {
       languagesPresent.forEach(l => activeFilters.add(l.code));
     }
-    updateFiltersUI(filterBar, languagesPresent);
+    updateFiltersUI(filterBar);
     filterGrid();
   });
   filterBar.appendChild(allBtn);
 
-  // Individual language filter buttons
   languagesPresent.forEach(lang => {
     const btn = document.createElement('button');
     btn.className = `bb-filter-btn bb-lang-${lang.code} ${activeFilters.has(lang.code) ? 'active' : ''}`;
@@ -277,26 +318,67 @@ function renderDiscoveryGrid(container) {
       } else {
         activeFilters.add(lang.code);
       }
-      updateFiltersUI(filterBar, languagesPresent);
+      updateFiltersUI(filterBar);
       filterGrid();
     });
     
     filterBar.appendChild(btn);
   });
+  controlsRow.appendChild(filterBar);
+
+  // Sort & Search Options
+  const searchOptions = document.createElement('div');
+  searchOptions.className = 'bb-search-options';
+
+  // Duration Filter Dropdown
+  const durationSelect = document.createElement('select');
+  durationSelect.className = 'bb-select';
+  durationSelect.innerHTML = `
+    <option value="any" ${durationFilter === 'any' ? 'selected' : ''}>Any Duration</option>
+    <option value="short" ${durationFilter === 'short' ? 'selected' : ''}>Short (< 4m)</option>
+    <option value="medium" ${durationFilter === 'medium' ? 'selected' : ''}>Medium (4-20m)</option>
+    <option value="long" ${durationFilter === 'long' ? 'selected' : ''}>Long (> 20m)</option>
+  `;
+  durationSelect.addEventListener('change', (e) => {
+    durationFilter = e.target.value;
+    filterGrid();
+  });
+
+  // Sort Select Dropdown
+  const sortSelect = document.createElement('select');
+  sortSelect.className = 'bb-select';
+  sortSelect.innerHTML = `
+    <option value="relevance" ${sortBy === 'relevance' ? 'selected' : ''}>Sort: Relevance</option>
+    <option value="views" ${sortBy === 'views' ? 'selected' : ''}>Sort: Most Viewed</option>
+    <option value="date" ${sortBy === 'date' ? 'selected' : ''}>Sort: Newest First</option>
+  `;
+  sortSelect.addEventListener('change', (e) => {
+    sortBy = e.target.value;
+    filterGrid();
+  });
+
+  searchOptions.appendChild(durationSelect);
+  searchOptions.appendChild(sortSelect);
+  controlsRow.appendChild(searchOptions);
   
-  header.appendChild(filterBar);
+  header.appendChild(controlsRow);
   container.appendChild(header);
 
-  // 3. Create Grid
+  // 3. Create Grid/List wrapper
   const grid = document.createElement('div');
-  grid.className = 'bb-grid';
+  grid.className = `bb-grid ${layoutMode === 'grid' ? 'grid-view' : 'list-view'}`;
   container.appendChild(grid);
 
-  // Render cards
-  renderCards(grid);
+  // 4. Create Pagination footer wrapper
+  const footer = document.createElement('div');
+  footer.className = 'bb-show-more-container';
+  container.appendChild(footer);
+
+  // Render cards initially
+  renderCards(grid, footer);
 }
 
-function updateFiltersUI(filterBar, languagesPresent) {
+function updateFiltersUI(filterBar) {
   const buttons = filterBar.querySelectorAll('.bb-filter-btn[data-lang]');
   buttons.forEach(btn => {
     const code = btn.getAttribute('data-lang');
@@ -308,21 +390,53 @@ function updateFiltersUI(filterBar, languagesPresent) {
   });
 }
 
-function renderCards(grid) {
+function updateGridLayout() {
+  const grid = document.querySelector('#barrier-breaker-discovery-layer .bb-grid');
+  const footer = document.querySelector('#barrier-breaker-discovery-layer .bb-show-more-container');
+  if (grid && footer) {
+    grid.className = `bb-grid ${layoutMode === 'grid' ? 'grid-view' : 'list-view'}`;
+    renderCards(grid, footer);
+  }
+}
+
+function renderCards(grid, footer) {
   grid.innerHTML = '';
+  footer.innerHTML = '';
   
-  const filteredVideos = currentVideos.filter(v => activeFilters.has(v.language.code));
+  // 1. Language Filtering
+  let processed = currentVideos.filter(v => activeFilters.has(v.language.code));
   
-  if (filteredVideos.length === 0) {
+  // 2. Duration Filtering
+  if (durationFilter !== 'any') {
+    processed = processed.filter(v => {
+      const len = v.lengthSeconds;
+      if (durationFilter === 'short') return len > 0 && len < 240;
+      if (durationFilter === 'medium') return len >= 240 && len <= 1200;
+      if (durationFilter === 'long') return len > 1200;
+      return true;
+    });
+  }
+
+  // 3. Sorting logic
+  if (sortBy === 'views') {
+    processed.sort((a, b) => b.views - a.views);
+  } else if (sortBy === 'date') {
+    processed.sort((a, b) => a.publishedSeconds - b.publishedSeconds); // Ascending: smaller seconds = newer
+  }
+
+  // 4. Page Slicing (Pagination)
+  const visibleVideos = processed.slice(0, visibleCount);
+
+  if (visibleVideos.length === 0) {
     grid.innerHTML = `
       <div style="grid-column: 1/-1; text-align: center; padding: 48px; font-size: 13px; color: var(--bb-text-secondary); border: 1px dashed rgba(128,128,128,0.2); border-radius: 12px; background: rgba(255,255,255,0.01);">
-        No languages selected. Select languages in the toolbar above to inspect content.
+        No matching global videos found. Adjust your active languages or filters.
       </div>
     `;
     return;
   }
 
-  filteredVideos.forEach(v => {
+  visibleVideos.forEach(v => {
     const card = document.createElement('a');
     card.href = `/watch?v=${v.id}`;
     card.className = `bb-card bb-lang-${v.language.code}`;
@@ -349,7 +463,7 @@ function renderCards(grid) {
       </div>
     `;
 
-    // Intercept click to track stat
+    // Intercept click to track stat safely
     card.addEventListener('click', (e) => {
       e.preventDefault();
       const targetUrl = `/watch?v=${v.id}`;
@@ -368,12 +482,25 @@ function renderCards(grid) {
 
     grid.appendChild(card);
   });
+
+  // 5. Render "Show More" Pagination Button if there are remaining results
+  if (visibleCount < processed.length) {
+    const showMoreBtn = document.createElement('button');
+    showMoreBtn.className = 'bb-show-more-btn';
+    showMoreBtn.textContent = `Show More (${processed.length - visibleCount} remaining)`;
+    showMoreBtn.addEventListener('click', () => {
+      visibleCount += 6;
+      renderCards(grid, footer);
+    });
+    footer.appendChild(showMoreBtn);
+  }
 }
 
 function filterGrid() {
   const grid = document.querySelector('#barrier-breaker-discovery-layer .bb-grid');
-  if (grid) {
-    renderCards(grid);
+  const footer = document.querySelector('#barrier-breaker-discovery-layer .bb-show-more-container');
+  if (grid && footer) {
+    renderCards(grid, footer);
   }
 }
 

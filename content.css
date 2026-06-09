@@ -4,38 +4,40 @@
 
 /* Theme Variables (Adapts to YouTube) */
 html, [dark] {
-  --bb-panel-bg: rgba(18, 18, 18, 0.55);
-  --bb-panel-border: 1px solid rgba(255, 255, 255, 0.12);
+  --bb-panel-bg: transparent; /* Blends natively into background */
+  --bb-panel-border: none;
   --bb-card-bg: rgba(255, 255, 255, 0.04);
-  --bb-card-hover-bg: rgba(255, 255, 255, 0.09);
+  --bb-card-hover-bg: rgba(255, 255, 255, 0.08);
   --bb-card-border: 1px solid rgba(255, 255, 255, 0.08);
   --bb-btn-bg: rgba(255, 255, 255, 0.06);
-  --bb-btn-hover-bg: rgba(255, 255, 255, 0.15);
+  --bb-btn-hover-bg: rgba(255, 255, 255, 0.14);
   --bb-text-primary: #f1f1f1;
   --bb-text-secondary: #aaaaaa;
-  --bb-text-muted: #606060;
-  --bb-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.35);
-  --bb-card-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.15);
-  --bb-glass-shine: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 60%);
+  --bb-text-muted: #707070;
+  --bb-shadow: none;
+  --bb-card-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  --bb-glass-shine: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0) 60%);
+  --bb-input-bg: rgba(0, 0, 0, 0.2);
 }
 
 html:not([dark]) {
-  --bb-panel-bg: rgba(255, 255, 255, 0.65);
-  --bb-panel-border: 1px solid rgba(0, 0, 0, 0.08);
+  --bb-panel-bg: transparent;
+  --bb-panel-border: none;
   --bb-card-bg: rgba(0, 0, 0, 0.02);
-  --bb-card-hover-bg: rgba(0, 0, 0, 0.05);
+  --bb-card-hover-bg: rgba(0, 0, 0, 0.04);
   --bb-card-border: 1px solid rgba(0, 0, 0, 0.06);
   --bb-btn-bg: rgba(0, 0, 0, 0.04);
-  --bb-btn-hover-bg: rgba(0, 0, 0, 0.09);
+  --bb-btn-hover-bg: rgba(0, 0, 0, 0.08);
   --bb-text-primary: #0f0f0f;
   --bb-text-secondary: #606060;
   --bb-text-muted: #909090;
-  --bb-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1);
-  --bb-card-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.04);
-  --bb-glass-shine: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 60%);
+  --bb-shadow: none;
+  --bb-card-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+  --bb-glass-shine: linear-gradient(135deg, rgba(255, 255, 255, 0.25) 0%, rgba(255, 255, 255, 0) 60%);
+  --bb-input-bg: rgba(255, 255, 255, 0.7);
 }
 
-/* Language Color Palette (Modern, Less Aggressive) */
+/* Language Color Palette (Pastel accents) */
 .bb-lang-ja { --lang-color: #ff6b8b; --lang-color-rgb: 255, 107, 139; }
 .bb-lang-es { --lang-color: #ffd166; --lang-color-rgb: 255, 209, 102; }
 .bb-lang-ru { --lang-color: #06d6a0; --lang-color-rgb: 6, 214, 160; }
@@ -46,43 +48,27 @@ html:not([dark]) {
 .bb-lang-hi { --lang-color: #ff007f; --lang-color-rgb: 255, 0, 127; }
 
 /* ==========================================
-   MAIN CONTAINER (FROSTED GLASS LAYER)
+   MAIN CONTAINER (NATIVE FEED SHELF BLEND)
    ========================================== */
 
 .bb-container {
   display: block;
-  margin: 16px 24px 24px 24px;
-  padding: 24px;
+  margin: 0 0 24px 0; /* Align perfectly with YouTube search results column */
+  padding: 16px 0 24px 0;
   background: var(--bb-panel-bg);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
   border: var(--bb-panel-border);
   box-shadow: var(--bb-shadow);
-  border-radius: 16px;
-  transition: all 0.3s ease;
   font-family: inherit;
   position: relative;
-  overflow: hidden;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.15); /* Sleek bottom divider */
   z-index: 10;
-}
-
-/* Glass shine overlay */
-.bb-container::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: var(--bb-glass-shine);
-  pointer-events: none;
 }
 
 /* Header UI */
 .bb-header {
-  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
-  padding-bottom: 18px;
-  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+  padding-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .bb-header-row {
@@ -96,46 +82,85 @@ html:not([dark]) {
 .bb-title-group {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .bb-logo-icon {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   animation: glow-pulse 3s infinite ease-in-out;
 }
 
 .bb-title {
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  font-size: 16px;
+  font-weight: 500;
   color: var(--bb-text-primary);
   margin: 0;
 }
 
 .bb-subtitle {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 400;
   color: var(--bb-text-secondary);
-  margin-top: 4px;
+  margin-top: 3px;
 }
 
-/* Minimalist Filter Bar */
+/* View mode toggler */
+.bb-view-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--bb-btn-bg);
+  border: 1px solid rgba(128, 128, 128, 0.1);
+  padding: 3px;
+  border-radius: 18px;
+}
+
+.bb-view-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 15px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--bb-text-secondary);
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.bb-view-btn.active {
+  background: var(--bb-text-primary);
+  color: var(--bb-input-bg);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+/* ==========================================
+   ADVANCED FILTERS & SEARCH CONTROLS
+   ========================================== */
+
+.bb-controls-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+}
+
 .bb-filter-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
+  gap: 6px;
 }
 
 .bb-filter-btn {
   background: var(--bb-btn-bg);
-  border: 1px solid rgba(128, 128, 128, 0.15);
+  border: 1px solid rgba(128, 128, 128, 0.1);
   color: var(--bb-text-primary);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
-  padding: 6px 14px;
-  border-radius: 20px;
+  padding: 5px 12px;
+  border-radius: 15px;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
   outline: none;
@@ -143,28 +168,55 @@ html:not([dark]) {
 
 .bb-filter-btn:hover {
   background: var(--bb-btn-hover-bg);
-  transform: translateY(-1px);
 }
 
 .bb-filter-btn.active {
-  background: rgba(var(--lang-color-rgb), 0.15);
+  background: rgba(var(--lang-color-rgb), 0.12);
   color: var(--lang-color);
   border-color: var(--lang-color);
-  box-shadow: 0 4px 12px rgba(var(--lang-color-rgb), 0.15);
+}
+
+/* Search options inputs */
+.bb-search-options {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bb-select {
+  background: var(--bb-btn-bg);
+  border: 1px solid rgba(128, 128, 128, 0.15);
+  color: var(--bb-text-primary);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: 15px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.bb-select:focus {
+  border-color: #06d6a0;
+}
+
+.bb-select option {
+  background-color: #1a1a1a;
+  color: #ffffff;
 }
 
 /* ==========================================
-   MINIMAL GLASS VIDEO CARDS
+   GRID VIEW
    ========================================== */
 
-.bb-grid {
+.bb-grid.grid-view {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 24px;
   margin-top: 8px;
 }
 
-.bb-card {
+.bb-grid.grid-view .bb-card {
   display: flex;
   flex-direction: column;
   background: var(--bb-card-bg);
@@ -176,9 +228,11 @@ html:not([dark]) {
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   overflow: hidden;
   position: relative;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
-.bb-card:hover {
+.bb-grid.grid-view .bb-card:hover {
   transform: translateY(-4px);
   background: var(--bb-card-hover-bg);
   border-color: var(--lang-color, rgba(255, 255, 255, 0.2));
@@ -186,14 +240,97 @@ html:not([dark]) {
               0 0 16px 0 rgba(var(--lang-color-rgb), 0.15);
 }
 
-/* Card Thumbnail */
-.bb-thumb-wrapper {
+.bb-grid.grid-view .bb-thumb-wrapper {
   position: relative;
   width: 100%;
   aspect-ratio: 16/9;
   background: rgba(0, 0, 0, 0.2);
   overflow: hidden;
 }
+
+.bb-grid.grid-view .bb-details {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+}
+
+/* ==========================================
+   LIST VIEW (BLENDS WITH YT NATIVE RESULTS)
+   ========================================== */
+
+.bb-grid.list-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.bb-grid.list-view .bb-card {
+  display: flex;
+  flex-direction: row;
+  background: var(--bb-card-bg);
+  border: var(--bb-card-border);
+  box-shadow: var(--bb-card-shadow);
+  border-radius: 12px;
+  text-decoration: none !important;
+  color: inherit !important;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  overflow: hidden;
+  position: relative;
+  padding: 12px;
+  gap: 16px;
+  align-items: flex-start;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.bb-grid.list-view .bb-card:hover {
+  transform: translateX(4px);
+  background: var(--bb-card-hover-bg);
+  border-color: var(--lang-color, rgba(255, 255, 255, 0.2));
+  box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.2), 
+              0 0 12px 0 rgba(var(--lang-color-rgb), 0.12);
+}
+
+.bb-grid.list-view .bb-thumb-wrapper {
+  position: relative;
+  width: 250px; /* Aligns with YouTube list spacing */
+  aspect-ratio: 16/9;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.bb-grid.list-view .bb-details {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  padding: 2px 0;
+  height: 100%;
+}
+
+.bb-grid.list-view .bb-video-title {
+  font-size: 16px; /* Larger title for list layout */
+  font-weight: 500;
+  line-height: 1.35;
+  margin-bottom: 6px;
+}
+
+.bb-grid.list-view .bb-original-title {
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.bb-grid.list-view .bb-channel {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+/* ==========================================
+   COMMON CARD ELEMENTS
+   ========================================== */
 
 .bb-thumb-img {
   width: 100%;
@@ -206,83 +343,39 @@ html:not([dark]) {
   transform: scale(1.03);
 }
 
-/* Frosted Language Tag */
 .bb-lang-badge {
   position: absolute;
   top: 8px;
   left: 8px;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.7);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--lang-color, #ffffff);
-  border: 1px solid rgba(var(--lang-color-rgb), 0.3);
-  font-size: 10px;
+  border: 1px solid rgba(var(--lang-color-rgb), 0.4);
+  font-size: 9px;
   font-weight: 600;
-  padding: 3px 10px;
-  border-radius: 20px;
+  padding: 2px 8px;
+  border-radius: 12px;
   letter-spacing: 0.5px;
 }
 
-/* Duration Stamp */
 .bb-duration {
   position: absolute;
   bottom: 8px;
   right: 8px;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(0, 0, 0, 0.8);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   color: #ffffff;
   font-size: 10px;
   font-weight: 500;
-  padding: 2px 6px;
+  padding: 2px 5px;
   border-radius: 4px;
 }
 
-/* Card Metadata */
-.bb-details {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  flex-grow: 1;
-}
-
 .bb-video-title {
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.4;
-  margin: 0 0 6px 0;
   color: var(--bb-text-primary);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.bb-original-title {
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1.3;
-  color: var(--bb-text-secondary);
-  opacity: 0.85;
-  margin-top: 4px;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  font-style: italic;
-}
-
-.bb-channel {
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--bb-text-secondary);
-  margin-top: 2px;
-  margin-bottom: 8px;
-  display: inline-block;
-}
-
-.bb-channel:hover {
-  color: var(--bb-text-primary);
+  margin: 0;
 }
 
 .bb-meta-row {
@@ -298,8 +391,39 @@ html:not([dark]) {
 .bb-proxy-info {
   font-size: 10px;
   font-family: monospace;
-  opacity: 0.8;
+  opacity: 0.85;
   color: var(--lang-color, var(--bb-text-muted));
+}
+
+/* ==========================================
+   PAGINATION ("SHOW MORE" FROSTED BUTTON)
+   ========================================== */
+
+.bb-show-more-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+}
+
+.bb-show-more-btn {
+  background: var(--bb-btn-bg);
+  border: 1px solid rgba(128, 128, 128, 0.15);
+  color: var(--bb-text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 28px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  outline: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.bb-show-more-btn:hover {
+  background: var(--bb-btn-hover-bg);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.05);
 }
 
 /* ==========================================
@@ -334,7 +458,7 @@ html:not([dark]) {
 .bb-loading-bar {
   height: 100%;
   width: 40%;
-  background: #39ff14; /* soft neon loading highlight */
+  background: #06d6a0; /* soft mint loading fill */
   border-radius: 4px;
   animation: loading-slide 1.5s infinite ease-in-out;
 }
@@ -351,7 +475,7 @@ html:not([dark]) {
 
 @keyframes glow-pulse {
   0%, 100% { opacity: 0.6; filter: drop-shadow(0 0 0px transparent); }
-  50% { opacity: 1; filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.4)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.3)); }
 }
 
 @keyframes loading-slide {

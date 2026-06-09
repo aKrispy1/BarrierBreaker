@@ -71,13 +71,30 @@ chrome.runtime.onInstalled.addListener(() => {
     if (!res.invidiousInstances) updates.invidiousInstances = DEFAULT_INSTANCES;
     if (res.bubblesBurst === undefined) updates.bubblesBurst = 0;
     if (res.isEnabled === undefined) updates.isEnabled = true;
-    if (!res.maxResultsPerLang) updates.maxResultsPerLang = 2;
+    if (!res.maxResultsPerLang) updates.maxResultsPerLang = 10;
     
     if (Object.keys(updates).length > 0) {
       chrome.storage.local.set(updates);
     }
   });
 });
+
+// Helper to convert relative publish time (e.g. "3 days ago") to seconds for sorting
+function parsePublishedTextToSeconds(text) {
+  if (!text) return 9999999999;
+  const match = text.match(/(\d+)\s+(second|minute|hour|day|week|month|year)/i);
+  if (!match) return 9999999999;
+  const val = parseInt(match[1], 10);
+  const unit = match[2].toLowerCase();
+  let multiplier = 1;
+  if (unit.startsWith('minute')) multiplier = 60;
+  else if (unit.startsWith('hour')) multiplier = 3600;
+  else if (unit.startsWith('day')) multiplier = 86400;
+  else if (unit.startsWith('week')) multiplier = 604800;
+  else if (unit.startsWith('month')) multiplier = 2592000;
+  else if (unit.startsWith('year')) multiplier = 31536000;
+  return val * multiplier;
+}
 
 chrome.runtime.onStartup.addListener(() => {
   setupHeaderRules();
@@ -119,7 +136,7 @@ async function processGlobalSearch(searchQuery) {
   
   const activeLangs = store.activeLanguages || DEFAULT_LANGUAGES;
   const instances = store.invidiousInstances || DEFAULT_INSTANCES;
-  const maxResults = store.maxResultsPerLang || 2;
+  const maxResults = store.maxResultsPerLang || 10;
   const excludeEnglish = store.excludeEnglish || false;
   
   if (activeLangs.length === 0) return [];
@@ -171,55 +188,60 @@ async function processGlobalSearch(searchQuery) {
       .filter(item => item.type === 'video' && item.videoId)
       .slice(0, maxResults)
       .map(v => {
-        // Find best thumbnail URL
-        let thumbnail = '';
-        if (v.videoThumbnails && v.videoThumbnails.length > 0) {
-          // Find the highest resolution thumbnail (usually last or has highest width)
-          const sortedThumbs = [...v.videoThumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
-          thumbnail = sortedThumbs[0].url;
-        } else {
-          thumbnail = `https://img.youtube.com/vi/${v.videoId}/mqdefault.jpg`;
-        }
-        
-        // Ensure thumbnail URL has https/absolute format
-        if (thumbnail.startsWith('//')) {
-          thumbnail = 'https:' + thumbnail;
-        } else if (thumbnail.startsWith('/')) {
-          thumbnail = usedInstance + thumbnail;
-        }
-        
         return {
           id: v.videoId,
           title: v.title,
           originalTitle: v.title,
           translatedTitle: '', // will be populated
+          thumbnail: `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`, // Official YouTube CDN (Bypasses CSP blocks)
           author: v.author,
           authorUrl: v.authorUrl || `https://www.youtube.com/channel/${v.authorId}`,
           lengthText: v.lengthSeconds ? formatDuration(v.lengthSeconds) : '',
+          lengthSeconds: v.lengthSeconds || 0,
           viewsText: v.viewCount ? formatViews(v.viewCount) : '',
+          views: v.viewCount || 0, // numeric views for sorting
           publishedText: v.publishedText || '',
+          publishedSeconds: parsePublishedTextToSeconds(v.publishedText), // numeric age for sorting
           language: lang,
           queryUsed: translated,
           instanceUsed: usedInstance
         };
       });
 
-    // Translate titles back to English in parallel
-    const titleTranslationPromises = videos.map(async (v) => {
-      if (lang.code !== 'en') {
-        try {
-          const translatedTitle = await translateText(v.originalTitle, lang.code, 'en');
-          if (translatedTitle !== v.originalTitle) {
-            v.translatedTitle = translatedTitle;
-          }
-        } catch (e) {
-          console.warn(`Failed translating title back to English:`, e);
+    // Translate video titles back to English in a single batch request
+    if (lang.code !== 'en' && videos.length > 0) {
+      try {
+        const textToTranslate = videos.map(v => v.originalTitle).join('\n');
+        const translatedText = await translateText(textToTranslate, lang.code, 'en');
+        const translatedTitles = translatedText.split('\n').map(t => t.trim());
+        
+        if (translatedTitles.length === videos.length) {
+          videos.forEach((v, idx) => {
+            const trans = translatedTitles[idx];
+            if (trans && trans.toLowerCase() !== v.originalTitle.toLowerCase()) {
+              v.translatedTitle = trans;
+            }
+          });
+        } else {
+          // Fallback to individual translations if counts mismatch
+          console.warn(`[BarrierBreaker] Batch translation count mismatch (${translatedTitles.length} vs ${videos.length}). Using fallbacks.`);
+          await Promise.all(videos.map(async (v) => {
+            try {
+              const trans = await translateText(v.originalTitle, lang.code, 'en');
+              if (trans && trans.toLowerCase() !== v.originalTitle.toLowerCase()) {
+                v.translatedTitle = trans;
+              }
+            } catch (e) {
+              console.warn(`Failed translating title:`, e);
+            }
+          }));
         }
+      } catch (err) {
+        console.warn(`Failed batch translating titles for ${lang.name}:`, err);
       }
-      return v;
-    });
+    }
 
-    return Promise.all(titleTranslationPromises);
+    return videos;
   });
 
   const resultsByLang = await Promise.all(fetchPromises);
