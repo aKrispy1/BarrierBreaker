@@ -114,12 +114,13 @@ async function fetchInvidiousResults(instance, query, langCode) {
 async function processGlobalSearch(searchQuery) {
   // 1. Get configurations
   const store = await new Promise((resolve) => {
-    chrome.storage.local.get(['activeLanguages', 'invidiousInstances', 'maxResultsPerLang'], resolve);
+    chrome.storage.local.get(['activeLanguages', 'invidiousInstances', 'maxResultsPerLang', 'excludeEnglish'], resolve);
   });
   
   const activeLangs = store.activeLanguages || DEFAULT_LANGUAGES;
   const instances = store.invidiousInstances || DEFAULT_INSTANCES;
   const maxResults = store.maxResultsPerLang || 2;
+  const excludeEnglish = store.excludeEnglish || false;
   
   if (activeLangs.length === 0) return [];
 
@@ -224,7 +225,19 @@ async function processGlobalSearch(searchQuery) {
   const resultsByLang = await Promise.all(fetchPromises);
   
   // Aggregate and flatten
-  const aggregatedResults = resultsByLang.flat();
+  let aggregatedResults = resultsByLang.flat();
+  
+  // Exclude English videos if configured
+  if (excludeEnglish) {
+    aggregatedResults = aggregatedResults.filter(v => {
+      // If original language is not English, but back-translation to English resulted in no change 
+      // (v.translatedTitle is empty), we classify it as an English video.
+      if (v.language.code !== 'en' && !v.translatedTitle) {
+        return false;
+      }
+      return true;
+    });
+  }
   
   // Deduplicate by video ID just in case
   const seenIds = new Set();

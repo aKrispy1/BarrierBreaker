@@ -37,7 +37,8 @@ function loadConfig() {
     'activeLanguages',
     'invidiousInstances',
     'bubblesBurst',
-    'maxResultsPerLang'
+    'maxResultsPerLang',
+    'excludeEnglish'
   ], (res) => {
     // 1. Set Power toggle
     const isEnabled = res.isEnabled !== undefined ? res.isEnabled : true;
@@ -48,6 +49,7 @@ function loadConfig() {
     
     // 3. Set Max results
     document.getElementById('max-results').value = res.maxResultsPerLang || 2;
+    document.getElementById('exclude-english-toggle').checked = res.excludeEnglish || false;
     
     // 4. Render Languages List
     const activeLangs = res.activeLanguages || DEFAULT_LANGUAGES;
@@ -125,12 +127,15 @@ function saveConfig() {
     return;
   }
   
+  const excludeEnglish = document.getElementById('exclude-english-toggle').checked;
+  
   // Save to local storage
   chrome.storage.local.set({
     isEnabled,
     activeLanguages: activeLangs,
     invidiousInstances: instances,
-    maxResultsPerLang: maxResults
+    maxResultsPerLang: maxResults,
+    excludeEnglish
   }, () => {
     showToast('Configuration Saved');
   });
@@ -142,7 +147,8 @@ function resetConfig() {
     isEnabled: true,
     activeLanguages: DEFAULT_LANGUAGES,
     invidiousInstances: DEFAULT_INSTANCES,
-    maxResultsPerLang: 2
+    maxResultsPerLang: 2,
+    excludeEnglish: false
   }, () => {
     showToast('Reset to Defaults');
     setTimeout(() => {

@@ -4,6 +4,12 @@ let lastUrl = '';
 let isInjecting = false;
 let currentVideos = [];
 let activeFilters = new Set(); // Set of active language codes
+let checkUrlInterval = null;
+
+// Helper to verify if extension context has been invalidated (e.g. extension was reloaded)
+function isContextValid() {
+  return typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id;
+}
 
 // Sleek Pastel SVG Logo (matches icon.svg style)
 const LOGO_SVG = `
@@ -18,11 +24,17 @@ const LOGO_SVG = `
 
 // Start checking URL changes
 function init() {
-  setInterval(checkUrl, 1000);
+  checkUrlInterval = setInterval(checkUrl, 1000);
   checkUrl(); // Run immediately
 }
 
 function checkUrl() {
+  if (!isContextValid()) {
+    console.warn('[BarrierBreaker] Extension context invalidated. Terminating routing loop. Please reload the YouTube page.');
+    if (checkUrlInterval) clearInterval(checkUrlInterval);
+    return;
+  }
+
   const url = window.location.href;
 
   if (url.includes('/results') && url.includes('search_query=')) {
@@ -55,6 +67,7 @@ function removeDiscoveryLayer() {
 }
 
 async function setupDiscoveryLayer(query) {
+  if (!isContextValid()) return;
   if (isInjecting) return;
   isInjecting = true;
   
@@ -72,6 +85,7 @@ async function setupDiscoveryLayer(query) {
   let attempts = 0;
   while (!parent && attempts < 20) {
     await new Promise(r => setTimeout(r, 500));
+    if (!isContextValid()) return;
     parent = document.querySelector(targetSelector);
     attempts++;
   }
@@ -119,38 +133,49 @@ async function setupDiscoveryLayer(query) {
     parent.appendChild(container);
   }
 
-  // Request results from background script
-  chrome.runtime.sendMessage({ type: 'FETCH_GLOBAL_RESULTS', query: query }, (response) => {
+  // Request results from background script with try-catch validation
+  try {
+    if (!isContextValid()) return;
+    chrome.runtime.sendMessage({ type: 'FETCH_GLOBAL_RESULTS', query: query }, (response) => {
+      isInjecting = false;
+      
+      if (!isContextValid()) return;
+      
+      if (chrome.runtime.lastError) {
+        renderError(container, `Extension communication error: ${chrome.runtime.lastError.message}`);
+        return;
+      }
+      
+      if (!response || response.disabled) {
+        removeDiscoveryLayer();
+        return;
+      }
+      
+      if (!response.success) {
+        renderError(container, response.error || 'Unknown error occurred while fetching results.');
+        return;
+      }
+      
+      currentVideos = response.videos || [];
+      
+      if (currentVideos.length === 0) {
+        renderEmpty(container);
+        return;
+      }
+
+      // Populate active filters with all returned languages
+      activeFilters.clear();
+      currentVideos.forEach(v => activeFilters.add(v.language.code));
+
+      renderDiscoveryGrid(container);
+    });
+  } catch (err) {
     isInjecting = false;
-    
-    if (chrome.runtime.lastError) {
-      renderError(container, `Extension communication error: ${chrome.runtime.lastError.message}`);
-      return;
+    console.warn('[BarrierBreaker] Send message failed, extension context likely invalidated:', err.message);
+    if (err.message.includes('Extension context invalidated')) {
+      if (checkUrlInterval) clearInterval(checkUrlInterval);
     }
-    
-    if (!response || response.disabled) {
-      removeDiscoveryLayer();
-      return;
-    }
-    
-    if (!response.success) {
-      renderError(container, response.error || 'Unknown error occurred while fetching results.');
-      return;
-    }
-    
-    currentVideos = response.videos || [];
-    
-    if (currentVideos.length === 0) {
-      renderEmpty(container);
-      return;
-    }
-
-    // Populate active filters with all returned languages
-    activeFilters.clear();
-    currentVideos.forEach(v => activeFilters.add(v.language.code));
-
-    renderDiscoveryGrid(container);
-  });
+  }
 }
 
 function renderError(container, errorMsg) {
@@ -327,10 +352,18 @@ function renderCards(grid) {
     // Intercept click to track stat
     card.addEventListener('click', (e) => {
       e.preventDefault();
-      chrome.runtime.sendMessage({ type: 'TRACK_CLICK' }, () => {
-        // Smooth navigation inside YouTube SPA
-        window.location.href = `/watch?v=${v.id}`;
-      });
+      const targetUrl = `/watch?v=${v.id}`;
+      if (isContextValid()) {
+        try {
+          chrome.runtime.sendMessage({ type: 'TRACK_CLICK' }, () => {
+            window.location.href = targetUrl;
+          });
+        } catch (err) {
+          window.location.href = targetUrl;
+        }
+      } else {
+        window.location.href = targetUrl;
+      }
     });
 
     grid.appendChild(card);
