@@ -470,7 +470,7 @@ function renderCards(grid, footer) {
         <div class="bb-channel">${v.author}</div>
         <div class="bb-meta-row">
           <span>${v.viewsText ? `${v.viewsText} • ` : ''}${v.publishedText}</span>
-          <span class="bb-proxy-info">${parseHostname(v.instanceUsed)}</span>
+          <span class="bb-proxy-info">${v.source === 'innertube' ? 'youtube' : parseHostname(v.instanceUsed)}</span>
         </div>
       </div>
     `;
